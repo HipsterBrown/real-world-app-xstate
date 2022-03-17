@@ -5,13 +5,13 @@ import type { UserState } from '../machines/app.machine';
 
 type HeaderProps =
   | {
-      currentUser?: User;
-      userState: UserState;
-    }
+    currentUser?: User;
+    userState: UserState;
+  }
   | {
-      currentUser: User;
-      userState: "user.authenticated";
-    };
+    currentUser: User;
+    userState: "user.authenticated";
+  };
 
 export const Header: React.FC<HeaderProps> = ({ currentUser, userState }) => {
   return (
@@ -60,9 +60,9 @@ export const Header: React.FC<HeaderProps> = ({ currentUser, userState }) => {
                 <NavLink
                   className="nav-link"
                   activeClassName="active"
-                  to={`/profile/${currentUser.username}`}
+                  to={`/profile/${currentUser?.username}`}
                 >
-                  {currentUser.username}
+                  {currentUser?.username}
                 </NavLink>
               </li>
             </>

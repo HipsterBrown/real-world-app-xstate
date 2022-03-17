@@ -2,16 +2,20 @@
   "name": "realworld-xstate-react",
   "version": "1.0.0",
   "description": "An implementation of the Real World app with XState & React",
-  "main": "index.html",
+  "source": "index.html",
+  "browserslist": "> 0.5%, last 2 versions, not dead",
   "scripts": {
-    "build": "NODE_ENV=production parcel build *.html --out-dir _site --public-url ./",
+    "build": "NODE_ENV=production parcel build *.html --dist-dir _site --public-url ./",
     "start": "parcel index.html"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/HipsterBrown/realworld-starter-kit.git"
   },
-  "keywords": ["xstate", "react"],
+  "keywords": [
+    "xstate",
+    "react"
+  ],
   "author": "HipsterBrown",
   "license": "Apache-2.0",
   "bugs": {
@@ -24,7 +28,7 @@
     "dompurify": "^2.2.6",
     "formik": "^2.2.6",
     "history": "^4.10.1",
-    "marked": "^2.0.0",
+    "marked": "^4.0.12",
     "react": "^17.0.1",
     "react-dom": "^17.0.1",
     "react-router": "^5.2.0",
@@ -34,15 +38,15 @@
   },
   "devDependencies": {
     "@types/dompurify": "^2.2.1",
-    "@types/marked": "^1.2.2",
+    "@types/marked": "^4.0.2",
     "@types/node": "^14.14.22",
     "@types/react": "^17.0.0",
     "@types/react-dom": "^17.0.0",
     "@types/react-router": "^5.1.11",
     "@types/react-router-dom": "^5.1.7",
     "@types/yup": "^0.29.11",
-    "parcel-bundler": "^1.3.1",
+    "parcel": "^2.3.2",
     "tslib": "^2.1.0",
-    "typescript": "^4.1.3"
+    "typescript": "^4.6.2"
   }
 }

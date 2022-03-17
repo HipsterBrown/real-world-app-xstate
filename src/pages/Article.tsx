@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMachine } from "@xstate/react";
-import marked from "marked";
+import { marked } from "marked";
 import { sanitize } from "dompurify";
 import { articleMachine } from "../machines/article.machine";
 import type { User } from "../types/api";
@@ -53,7 +53,7 @@ export const Article: React.FC<ArticleProps> = ({
               <AuthorCard
                 variant={
                   current.context.article.author.username ===
-                  currentUser?.username
+                    currentUser?.username
                     ? "currentAuthor"
                     : "post"
                 }
@@ -94,7 +94,7 @@ export const Article: React.FC<ArticleProps> = ({
               <AuthorCard
                 variant={
                   current.context.article.author.username ===
-                  currentUser?.username
+                    currentUser?.username
                     ? "currentAuthor"
                     : "post"
                 }

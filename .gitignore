@@ -19,3 +19,4 @@ dist/
 .cache/
 .env
 _site
+.parcel-cache/
