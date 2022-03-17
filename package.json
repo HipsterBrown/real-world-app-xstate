@@ -24,7 +24,7 @@
   "homepage": "https://github.com/HipsterBrown/realworld-starter-kit#readme",
   "dependencies": {
     "@xstate/inspect": "^0.4.1",
-    "@xstate/react": "^1.2.2",
+    "@xstate/react": "^2.0.1",
     "dompurify": "^2.2.6",
     "formik": "^2.2.6",
     "history": "^4.10.1",
@@ -33,7 +33,7 @@
     "react-dom": "^17.0.1",
     "react-router": "^5.2.0",
     "react-router-dom": "^5.2.0",
-    "xstate": "^4.16.0",
+    "xstate": "^4.30.6",
     "yup": "^0.32.8"
   },
   "devDependencies": {
