@@ -55,7 +55,7 @@ export const Auth: React.FC<{
             <Formik<SignUpValues | LogInValues>
               initialValues={{ name: "", email: "", password: "" }}
               onSubmit={values => {
-                send(authModel.events.SUBMIT(values));
+                send(authModel.events.submit(values));
               }}
               validationSchema={mode === "signup" ? SignUpSchema : LogInSchema}
             >

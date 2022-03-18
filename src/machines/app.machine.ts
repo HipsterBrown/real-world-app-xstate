@@ -21,10 +21,10 @@ const initialContext: AppContext = {
 
 export const appModel = createModel(initialContext, {
   events: {
-    'LOGGED_IN': (user: User) => ({ user }),
-    'UPDATE_USER': (user: User) => ({ user }),
+    'logIn': (user: User) => ({ user }),
+    'updateUser': (user: User) => ({ user }),
     'done.invoke.userRequest': (data: UserResponse) => ({ data }),
-    'LOGGED_OUT': () => ({}),
+    'logOut': () => ({}),
     'error.platform': (data: ErrorsFrom<UserResponse>) => ({ data }),
   }
 })
@@ -94,7 +94,7 @@ export const appMachine = createMachine<ContextFrom<typeof appModel>, EventFrom<
           },
           authenticated: {
             on: {
-              LOGGED_OUT: {
+              logOut: {
                 actions: ["resetUserData", "resetToken", "goHome"],
                 target: "#app.user.unauthenticated"
               }
@@ -102,11 +102,11 @@ export const appMachine = createMachine<ContextFrom<typeof appModel>, EventFrom<
           }
         },
         on: {
-          LOGGED_IN: {
+          logIn: {
             target: ".authenticated",
             actions: "assignUserFromEvent"
           },
-          UPDATE_USER: {
+          updateUser: {
             actions: "assignUserFromEvent"
           }
         }
@@ -117,7 +117,7 @@ export const appMachine = createMachine<ContextFrom<typeof appModel>, EventFrom<
     actions: {
       assignUserFromEvent: appModel.assign({
         user: (context, event) => {
-          if (event.type === "UPDATE_USER" || event.type === "LOGGED_IN") {
+          if (event.type === "updateUser" || event.type === "logIn") {
             return event.user;
           }
           return context.user;

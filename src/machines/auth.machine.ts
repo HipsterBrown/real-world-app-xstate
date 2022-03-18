@@ -30,7 +30,7 @@ const initialContext: AuthContext = {
 
 export const authModel = createModel(initialContext, {
   events: {
-    'SUBMIT': (values: FormValues) => values,
+    'submit': (values: FormValues) => values,
     'error.platform': (data: ErrorsFrom<UserResponse>) => ({ data }),
     'done.invoke.signupUser': (data: UserResponse) => ({ data }),
     'done.invoke.loginUser': (data: UserResponse) => ({ data }),
@@ -82,7 +82,7 @@ export const authMachine = createMachine<ContextFrom<typeof authModel>, EventFro
     states: {
       idle: {
         on: {
-          SUBMIT: {
+          submit: {
             target: "submitting",
             actions: "assignFormValues"
           }
@@ -138,7 +138,7 @@ export const authMachine = createMachine<ContextFrom<typeof authModel>, EventFro
       failed: {
         onExit: "clearErrors",
         on: {
-          SUBMIT: {
+          submit: {
             target: "submitting",
             actions: "assignFormValues"
           }
@@ -155,7 +155,7 @@ export const authMachine = createMachine<ContextFrom<typeof authModel>, EventFro
           email: event.email,
           password: event.password
         };
-      }, 'SUBMIT'),
+      }, 'submit'),
       assignData: authModel.assign({
         token: (context, event) => {
           if (

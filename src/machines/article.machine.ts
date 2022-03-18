@@ -46,11 +46,11 @@ export const articleModel = createModel(initialContext, {
     'done.invoke.creatingComment': (data: CommentResponse) => ({ data }),
     'done.invoke.favoriting': (data: ArticleResponse) => ({ data }),
     'done.invoke.following': (data: ProfileResponse) => ({ data }),
-    'CREATE_COMMENT': (comment: { body: string }) => ({ comment }),
-    'TOGGLE_FOLLOW': (username: string) => ({ username }),
-    'TOGGLE_FAVORITE': () => ({}),
-    'DELETE_ARTICLE': () => ({}),
-    'DELETE_COMMENT': (id: Comment['id']) => ({ id }),
+    'createComment': (comment: { body: string }) => ({ comment }),
+    'toggleFollow': (username: string) => ({ username }),
+    'toggleFavorite': () => ({}),
+    'deleteArticle': () => ({}),
+    'deleteComment': (id: Comment['id']) => ({ id }),
   }
 })
 
@@ -86,7 +86,6 @@ type ArticleState =
   };
 
 export const articleMachine =
-  /** @xstate-layout N4IgpgJg5mDOIC5QEMBOAXAlgYwDZgDo0s9CAzMdbAC0wDsoBiCAezsPoDcWBrQmdAEEMOfIlAAHFrExY24kAA9EAJhUBWAgBYdAZl3qAnLoDs6gDQgAnonUAOAGwEAjCYe6ADM8MrD73SoAvoGWxKKEYaQE1MiwAMJs6GB06IwAKgDyAOJZADIAogD6AGIZubkZAOoKUjJydArKCFoqJgSG6irO+rqGzh5GhpY2COrdBL69Js5aXh526g7BoSJRkfjRsQkpyamZOQUlggBqGQBKAJJp+TXSspjySEqILboEDlomWovzunYefl0wxeHjekw6dhMdhmhg8JmWIHWEVWGxi8USu2YbA4dG4fAIZGQ3FQ9wYtzqDwaTyaLU0i2MBm+XV0zmBCBZbXBdm5X1MAK0CKRRBRhDR2ySKUYABF8gVroVBGc0hc4gVyfdHqAaSz3r1-P4vjotGyVHCJsZDG4NJ83IKRcKSKithjJax2AQuLxCBAwPgsAxhI6wOr6o0XupNAY7LMtIY7IY4yo2c4uubZh53J8HIsNHagwRsCwALZF3awAmUGj0JhunF4-iUBIlsshylhhAqBzOCbqTx2NRmXoZtnc7v9-TOaE29QCkKI+2F5spctil2pOJnfKCeVxDIAWT3+QAcmlW5rnqMdT5YzPdO5XB9k10tNoPuppiZLSZfM48+EC8WpbLps6I7JKMpykUu4Hsep5PLUGpUlqqgJhMGZdBm36Wn8xrWIgziToYBDjgY6igvYXh-lEi5Aeg5Z0Cw4qYhuW47vuh4nmeSEXp23YaH2A69rCDjJrGbQkX0Pg4bac5CjRZZYu6nr4tgqBgMg-pQE2tFce2vhOJ+GYpgslpwh4uEjCYd4uG4LLfLGah2MEc4MT68BPEKQoUFQtBkvBdyhtSiDfmyXYeAQnT3lougtIYWgOEEsn2kKq5gegulBc0bjtH8oIEfZoKhSodjmr00YeKaDj-EsSX5kiGXIc0dhsloJXgr0d4OFhLJURs8nAd5VZ+ZIAVtplJgmMmHgDDZ+gtA4HSTL+tX-v1dEgUxKQNRe9htJOLQTSoswOACSZ4Qg3S+K+3zRlorgBC0vWEGt9GMWu21NM47jtCoD39n0Xg5smAREa00X9kYOhwjVKz5i9H22EC53-CV44aARDhVa0T0Ix2FmIAAtEdBAmEZrRdndloJTVwRAA */
   createMachine<
     ContextFrom<typeof articleModel>,
     EventFrom<typeof articleModel>,
@@ -113,7 +112,7 @@ export const articleMachine =
             },
             hasContent: {
               on: {
-                TOGGLE_FOLLOW: {
+                toggleFollow: {
                   actions: choose([
                     {
                       actions: "goToSignup",
@@ -129,7 +128,7 @@ export const articleMachine =
                   ]),
                   target: "#article.article.hasContent",
                 },
-                TOGGLE_FAVORITE: {
+                toggleFavorite: {
                   actions: choose([
                     {
                       actions: "goToSignup",
@@ -145,7 +144,7 @@ export const articleMachine =
                   ]),
                   target: "#article.article.hasContent",
                 },
-                DELETE_ARTICLE: {
+                deleteArticle: {
                   actions: "deleteArticle",
                   target: "#article.article.hasContent",
                 },
@@ -175,11 +174,11 @@ export const articleMachine =
             },
             hasContent: {
               on: {
-                CREATE_COMMENT: {
+                createComment: {
                   actions: "createComment",
                   target: "#article.comments.hasContent",
                 },
-                DELETE_COMMENT: [
+                deleteComment: [
                   {
                     actions: "deleteComment",
                     cond: "isOnlyComment",
@@ -194,7 +193,7 @@ export const articleMachine =
             },
             noContent: {
               on: {
-                CREATE_COMMENT: {
+                createComment: {
                   actions: "createComment",
                   target: "#article.comments.hasContent",
                 },
@@ -232,7 +231,7 @@ export const articleMachine =
               "creatingComment"
             );
           }
-        }, 'CREATE_COMMENT'),
+        }, 'createComment'),
         deleteComment: articleModel.assign((context, event) => {
           return {
             ...context,
@@ -242,7 +241,7 @@ export const articleMachine =
             comments:
               context.comments?.filter(comment => comment.id === event.id) || []
           };
-        }, 'DELETE_COMMENT'),
+        }, 'deleteComment'),
         deleteFavorite: articleModel.assign((context) => {
           const article: Article = {
             ...context.article!,
@@ -258,7 +257,7 @@ export const articleMachine =
               "favoriting"
             )
           };
-        }, 'TOGGLE_FAVORITE'),
+        }, 'toggleFavorite'),
         favoriteArticle: articleModel.assign((context) => {
           const article: Article = {
             ...context.article!,
@@ -276,7 +275,7 @@ export const articleMachine =
               "favoriting"
             )
           };
-        }, 'TOGGLE_FAVORITE'),
+        }, 'toggleFavorite'),
         followAuthor: articleModel.assign((context, event) => {
           return {
             ...context,
@@ -294,7 +293,7 @@ export const articleMachine =
               }
             }
           };
-        }, 'TOGGLE_FOLLOW'),
+        }, 'toggleFollow'),
         unfollowAuthor: articleModel.assign((context, event) => {
           return {
             ...context,
@@ -309,7 +308,7 @@ export const articleMachine =
               }
             }
           };
-        }, 'TOGGLE_FOLLOW'),
+        }, 'toggleFollow'),
         assignNewComment: articleModel.assign({
           comments: (context, event) => {
             return [event.data.comment].concat(context.comments!);

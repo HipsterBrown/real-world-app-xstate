@@ -72,8 +72,8 @@ export const App: React.FC = () => {
           {current.matches("user.authenticated") && (
             <Settings
               currentUser={current.context.user}
-              onLogout={() => send(appModel.events.LOGGED_OUT())}
-              onUpdate={(user: User) => send(appModel.events.UPDATE_USER(user))}
+              onLogout={() => send(appModel.events.logOut())}
+              onUpdate={(user: User) => send(appModel.events.updateUser(user))}
             />
           )}
         </AuthenticatedRoute>

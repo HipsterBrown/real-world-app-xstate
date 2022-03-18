@@ -35,7 +35,7 @@ export const Article: React.FC<ArticleProps> = ({
     const bodyEl: HTMLTextAreaElement = event.currentTarget.elements.namedItem(
       "body"
     ) as HTMLTextAreaElement;
-    send(articleModel.events.CREATE_COMMENT(
+    send(articleModel.events.createComment(
       { body: bodyEl.value }
     ));
     bodyEl.value = "";
@@ -58,10 +58,10 @@ export const Article: React.FC<ArticleProps> = ({
                 }
                 {...current.context.article.author}
                 {...current.context.article}
-                onDelete={() => send(articleModel.events.DELETE_ARTICLE())}
-                onFavorite={() => send(articleModel.events.TOGGLE_FAVORITE())}
+                onDelete={() => send(articleModel.events.deleteArticle())}
+                onFavorite={() => send(articleModel.events.toggleFavorite())}
                 onFollow={() =>
-                  send(articleModel.events.TOGGLE_FOLLOW(current.context.article.author.username))
+                  send(articleModel.events.toggleFollow(current.context.article.author.username))
                 }
               />
             </div>
@@ -96,10 +96,10 @@ export const Article: React.FC<ArticleProps> = ({
                 }
                 {...current.context.article.author}
                 {...current.context.article}
-                onDelete={() => send(articleModel.events.DELETE_ARTICLE())}
-                onFavorite={() => send(articleModel.events.TOGGLE_FAVORITE())}
+                onDelete={() => send(articleModel.events.deleteArticle())}
+                onFavorite={() => send(articleModel.events.toggleFavorite())}
                 onFollow={() =>
-                  send(articleModel.events.TOGGLE_FOLLOW(current.context.article.author.username))
+                  send(articleModel.events.toggleFollow(current.context.article.author.username))
                 }
               />
             </div>
@@ -144,7 +144,7 @@ export const Article: React.FC<ArticleProps> = ({
                 {...comment}
                 onDelete={
                   comment.author.username === currentUser?.username
-                    ? id => send(articleModel.events.DELETE_COMMENT(id))
+                    ? id => send(articleModel.events.deleteComment(id))
                     : undefined
                 }
               />
