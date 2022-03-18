@@ -4,7 +4,7 @@ import { useMachine } from "@xstate/react";
 import { inspect } from "@xstate/inspect";
 import { history } from "./utils/history";
 import { isProd } from "./utils/env";
-import { appMachine, UserState } from "./machines/app.machine";
+import { appMachine, UserState, appModel } from "./machines/app.machine";
 import type { User } from "./types/api";
 import { Header } from "./components/Header";
 import { Footer } from "./components/Footer";
@@ -72,8 +72,8 @@ export const App: React.FC = () => {
           {current.matches("user.authenticated") && (
             <Settings
               currentUser={current.context.user}
-              onLogout={() => send({ type: "LOGGED_OUT" })}
-              onUpdate={(user: User) => send({ type: "UPDATE_USER", user })}
+              onLogout={() => send(appModel.events.LOGGED_OUT())}
+              onUpdate={(user: User) => send(appModel.events.UPDATE_USER(user))}
             />
           )}
         </AuthenticatedRoute>

@@ -7,8 +7,8 @@ import {
 } from "react-router-dom";
 import { useMachine } from "@xstate/react";
 import { isProd } from "../utils/env";
-import { feedMachine } from "../machines/feed.machine";
-import { profileMachine } from "../machines/profile.machine";
+import { feedMachine, feedModel } from "../machines/feed.machine";
+import { profileMachine, profileModel } from "../machines/profile.machine";
 import { ArticlePreview } from "../components/Article";
 import { Pagination } from "../components/Pagination";
 
@@ -51,13 +51,12 @@ export const Profile: React.FC<ProfileProps> = ({ isAuthenticated }) => {
 
   React.useEffect(() => {
     if (currentFeed.matches("feedLoaded")) {
-      sendToFeed({
-        type: "UPDATE_FEED",
+      sendToFeed(feedModel.events.updateFeed({
         limit,
         offset,
         [showFavorites ? "favorited" : "author"]: username,
         [showFavorites ? "author" : "Favorited"]: undefined
-      });
+      }));
     }
   }, [sendToFeed, offset, limit, showFavorites, username]);
 
@@ -75,12 +74,11 @@ export const Profile: React.FC<ProfileProps> = ({ isAuthenticated }) => {
                 <h4>{profile.username}</h4>
                 <p>{profile.bio}</p>
                 <button
-                  className={`btn btn-sm ${
-                    profile.following
-                      ? "btn-secondary"
-                      : "btn-outline-secondary"
-                  } action-btn`}
-                  onClick={() => send({ type: "TOGGLE_FOLLOWING" })}
+                  className={`btn btn-sm ${profile.following
+                    ? "btn-secondary"
+                    : "btn-outline-secondary"
+                    } action-btn`}
+                  onClick={() => send(profileModel.events.toggleFollowing())}
                 >
                   <i className="ion-plus-round"></i>
                   &nbsp; Follow{profile.following && "ing"} {profile.username}
@@ -137,7 +135,7 @@ export const Profile: React.FC<ProfileProps> = ({ isAuthenticated }) => {
                       {...article}
                       onFavorite={slug => {
                         if (slug) {
-                          sendToFeed({ type: "TOGGLE_FAVORITE", slug });
+                          sendToFeed(feedModel.events.toggleFavorite(slug));
                         }
                       }}
                     />

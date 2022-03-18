@@ -3,7 +3,7 @@ import { useMachine } from "@xstate/react";
 import { Formik, Form, Field } from "formik";
 import { object, string } from "yup";
 import { useParams } from "react-router-dom";
-import { editorMachine } from "../machines/editor.machine";
+import { editorMachine, editorModel } from "../machines/editor.machine";
 import { ErrorListItem } from "../components/ErrorListItem";
 import { mapErrors } from "../utils/errors";
 import { isProd } from "../utils/env";
@@ -37,10 +37,10 @@ export const Editor: React.FC = () => {
               }}
               validationSchema={EditorSchema}
               onSubmit={values => {
-                send({
-                  type: "SUBMIT",
-                  values: { ...values, tagList: values.tagList.split(",") }
-                });
+                send(editorModel.events.submit({
+                  ...values,
+                  tagList: values.tagList.split(",")
+                }));
               }}
               enableReinitialize={current.matches({ idle: "updating" })}
             >

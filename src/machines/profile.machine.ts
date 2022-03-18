@@ -1,14 +1,16 @@
 import {
   createMachine,
-  assign,
   spawn,
   actions,
   ActorRef,
-  EventObject
+  EventObject,
+  EventFrom,
+  ContextFrom,
 } from "xstate";
+import { createModel } from 'xstate/lib/model';
 import { history } from "../utils/history";
 import { get, post, del } from "../utils/api-client";
-import type { Profile, ProfileResponse, Errors } from "../types/api";
+import type { Profile, ProfileResponse, Errors, ErrorsFrom } from "../types/api";
 
 const { choose } = actions;
 
@@ -18,54 +20,53 @@ type ProfileContext = {
   followerRef?: ActorRef<EventObject>;
 };
 
-type ProfileEvent =
-  | {
-      type: "done.invoke.profileRequest";
-      data: ProfileResponse;
-    }
-  | {
-      type: "error.platform";
-      data: { errors: Errors };
-    }
-  | {
-      type: "TOGGLE_FOLLOWING";
-    }
-  | {
-      type: "done.invoke.followRequest";
-      data: ProfileResponse;
-    };
+const initialContext: ProfileContext = {
+  profile: undefined,
+  errors: undefined,
+  followerRef: undefined,
+}
+
+export const profileModel = createModel(initialContext, {
+  events: {
+    'done.invoke.profileRequest': (data: ProfileResponse) => ({ data }),
+    'done.invoke.followRequest': (data: ProfileResponse) => ({ data }),
+    'error.platform': (data: ErrorsFrom<ProfileResponse>) => ({ data }),
+    'toggleFollowing': () => ({}),
+  }
+})
 
 type ProfileState =
   | {
-      value: "loading";
-      context: {
-        profile: Partial<Profile>;
-        errors: undefined;
-      };
-    }
-  | {
-      value: "profileLoaded";
-      context: {
-        profile: Profile;
-        errors: undefined;
-      };
-    }
-  | {
-      value: "errored";
-      context: {
-        profile: undefined;
-        errors: Errors;
-      };
+    value: "loading";
+    context: {
+      profile: Partial<Profile>;
+      errors: undefined;
     };
+  }
+  | {
+    value: "profileLoaded";
+    context: {
+      profile: Profile;
+      errors: undefined;
+    };
+  }
+  | {
+    value: "errored";
+    context: {
+      profile: undefined;
+      errors: Errors;
+    };
+  };
 
 export const profileMachine = createMachine<
-  ProfileContext,
-  ProfileEvent,
+  ContextFrom<typeof profileModel>,
+  EventFrom<typeof profileModel>,
   ProfileState
 >(
   {
     id: "profile-loader",
     initial: "loading",
+    context: profileModel.initialContext,
     states: {
       loading: {
         invoke: {
@@ -83,7 +84,7 @@ export const profileMachine = createMachine<
       },
       profileLoaded: {
         on: {
-          TOGGLE_FOLLOWING: {
+          toggleFollowing: {
             actions: choose([
               {
                 cond: "notAuthenticated",
@@ -105,7 +106,7 @@ export const profileMachine = createMachine<
   },
   {
     actions: {
-      assignData: assign({
+      assignData: profileModel.assign({
         profile: (context, event) => {
           if (
             event.type === "done.invoke.profileRequest" ||
@@ -115,13 +116,12 @@ export const profileMachine = createMachine<
           return context.profile;
         }
       }),
-      assignErrors: assign({
-        errors: (context, event) => {
-          if (event.type === "error.platform") return event.data.errors;
-          return context.errors;
+      assignErrors: profileModel.assign({
+        errors: (_, event) => {
+          return event.data.errors;
         }
-      }),
-      followProfile: assign(context => {
+      }, 'error.platform'),
+      followProfile: profileModel.assign(context => {
         const { profile } = context;
         return {
           ...context,
@@ -137,9 +137,9 @@ export const profileMachine = createMachine<
             "followRequest"
           )
         };
-      }),
+      }, 'toggleFollowing'),
       goToSignup: () => history.push("/register"),
-      unfollowProfile: assign(context => {
+      unfollowProfile: profileModel.assign(context => {
         const { profile } = context;
         return {
           ...context,
@@ -152,7 +152,7 @@ export const profileMachine = createMachine<
             "followRequest"
           )
         };
-      })
+      }, 'toggleFollowing')
     },
     guards: {
       isFollowing: ({ profile }) => !!profile?.following

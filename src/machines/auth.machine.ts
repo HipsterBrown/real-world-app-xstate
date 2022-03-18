@@ -1,9 +1,16 @@
-import { createMachine, assign, sendParent } from "xstate";
+import { createMachine, sendParent, EventFrom, ContextFrom } from "xstate";
 import { history } from "../utils/history";
 import { post } from "../utils/api-client";
-import type { UserResponse } from "../types/api";
+import type { ErrorsFrom, UserResponse } from "../types/api";
+import { createModel } from "xstate/lib/model";
 
 type Nullable<T> = Record<keyof T, null>;
+
+export type FormValues = {
+  name?: string;
+  email: string;
+  password: string;
+}
 
 export type AuthContext = {
   name: string | null;
@@ -13,72 +20,65 @@ export type AuthContext = {
   token: string | null;
 };
 
-export type AuthEvent =
-  | {
-      type: "SUBMIT";
-      email: string;
-      password: string;
-      name?: string;
-    }
-  | {
-      type: "done.invoke.signupUser" | "done.invoke.loginUser";
-      data: UserResponse;
-    }
-  | {
-      type: "error.platform";
-      data: {
-        errors: Record<string, string[]>;
-      };
-    };
+const initialContext: AuthContext = {
+  name: null,
+  email: null,
+  password: null,
+  errors: null,
+  token: null,
+};
+
+export const authModel = createModel(initialContext, {
+  events: {
+    'SUBMIT': (values: FormValues) => values,
+    'error.platform': (data: ErrorsFrom<UserResponse>) => ({ data }),
+    'done.invoke.signupUser': (data: UserResponse) => ({ data }),
+    'done.invoke.loginUser': (data: UserResponse) => ({ data }),
+  }
+})
 
 export type AuthState =
   | { value: "idle"; context: Nullable<AuthContext> }
   | {
-      value: "submitting" | { submitting: "choosing" };
-      context: Nullable<AuthContext> & { email: string; password: string };
-    }
+    value: "submitting" | { submitting: "choosing" };
+    context: Nullable<AuthContext> & { email: string; password: string };
+  }
   | {
-      value: { submitting: "signup" };
-      context: Nullable<AuthContext> & {
-        email: string;
-        password: string;
-        name: string;
-      };
-    }
-  | {
-      value: { submitting: "login" };
-      context: Nullable<AuthContext> & { email: string; password: string };
-    }
-  | {
-      value: "authenticated";
-      context: Nullable<AuthContext> & {
-        email: string;
-        password: string;
-        name: string | null;
-        token: string;
-      };
-    }
-  | {
-      value: "failed";
-      context: AuthContext & {
-        email: string;
-        password: string;
-        name: string | null;
-        errors: Record<string, string[]>;
-      };
+    value: { submitting: "signup" };
+    context: Nullable<AuthContext> & {
+      email: string;
+      password: string;
+      name: string;
     };
+  }
+  | {
+    value: { submitting: "login" };
+    context: Nullable<AuthContext> & { email: string; password: string };
+  }
+  | {
+    value: "authenticated";
+    context: Nullable<AuthContext> & {
+      email: string;
+      password: string;
+      name: string | null;
+      token: string;
+    };
+  }
+  | {
+    value: "failed";
+    context: AuthContext & {
+      email: string;
+      password: string;
+      name: string | null;
+      errors: Record<string, string[]>;
+    };
+  };
 
-export const authMachine = createMachine<AuthContext, AuthEvent, AuthState>(
+export const authMachine = createMachine<ContextFrom<typeof authModel>, EventFrom<typeof authModel>, AuthState>(
   {
     id: "auth-request",
     initial: "idle",
-    context: {
-      name: null,
-      email: null,
-      password: null,
-      errors: null,
-      token: null
-    },
+    context: authModel.initialContext,
     states: {
       idle: {
         on: {
@@ -148,18 +148,15 @@ export const authMachine = createMachine<AuthContext, AuthEvent, AuthState>(
   },
   {
     actions: {
-      assignFormValues: assign((context, event) => {
-        if (event.type === "SUBMIT") {
-          return {
-            ...context,
-            name: event.name,
-            email: event.email,
-            password: event.password
-          };
-        }
-        return context;
-      }),
-      assignData: assign({
+      assignFormValues: authModel.assign((context, event) => {
+        return {
+          ...context,
+          name: event.name,
+          email: event.email,
+          password: event.password
+        };
+      }, 'SUBMIT'),
+      assignData: authModel.assign({
         token: (context, event) => {
           if (
             event.type === "done.invoke.loginUser" ||
@@ -170,18 +167,15 @@ export const authMachine = createMachine<AuthContext, AuthEvent, AuthState>(
           return context.token;
         }
       }),
-      assignErrors: assign({
-        errors: (context, event) => {
-          if (event.type === "error.platform") {
-            return event.data.errors;
-          }
-          return context.errors;
+      assignErrors: authModel.assign({
+        errors: (_, event) => {
+          return event.data.errors;
         }
-      }),
+      }, 'error.platform'),
       saveToken: context => {
         localStorage.setItem("conduit_token", context.token || "");
       },
-      clearErrors: assign({
+      clearErrors: authModel.assign({
         errors: context => {
           if (!!context.errors) return null;
           return context.errors;

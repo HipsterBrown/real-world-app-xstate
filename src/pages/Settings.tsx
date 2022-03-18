@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Formik, Form, Field } from "formik";
 import { useMachine } from "@xstate/react";
-import { settingsMachine } from "../machines/settings.machine";
+import { settingsMachine, settingsModel } from "../machines/settings.machine";
 import { isProd } from "../utils/env";
 import type { User } from "../types/api";
 
@@ -34,7 +34,7 @@ export const Settings: React.FC<SettingsProps> = ({
             <Formik<User>
               initialValues={currentUser}
               onSubmit={values => {
-                send({ type: "SUBMIT", values });
+                send(settingsModel.events.submit(values));
               }}
               enableReinitialize={true}
             >

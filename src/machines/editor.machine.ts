@@ -1,7 +1,8 @@
-import { createMachine, assign } from "xstate";
+import { createMachine, EventFrom, ContextFrom } from "xstate";
+import { createModel } from 'xstate/lib/model';
 import { get, post, put } from "../utils/api-client";
 import { history } from "../utils/history";
-import type { ArticleResponse, Article, Errors } from "../types/api";
+import type { ArticleResponse, Article, Errors, ErrorsFrom } from "../types/api";
 
 export type FormValues = Pick<
   Article,
@@ -15,78 +16,72 @@ type EditorContext = {
   slug?: string;
 };
 
-type EditorEvent =
-  | {
-      type: "done.invoke.articleRequest";
-      data: ArticleResponse;
-    }
-  | {
-      type: "done.invoke.getArticle";
-      data: ArticleResponse;
-    }
-  | {
-      type: "error.platform";
-      data: { errors: Errors };
-    }
-  | {
-      type: "SUBMIT";
-      values: FormValues;
-    };
+const initialContext: EditorContext = {};
+
+export const editorModel = createModel(initialContext, {
+  events: {
+    'done.invoke.articleRequest': (data: ArticleResponse) => ({ data }),
+    'done.invoke.getArticle': (data: ArticleResponse) => ({ data }),
+    'error.platform': (data: ErrorsFrom<ArticleResponse>) => ({ data }),
+    'submit': (values: FormValues) => ({ values }),
+  }
+})
 
 type EditorState =
   | {
-      value: "idle" | { idle: "creating" };
-      context: {
-        article: undefined;
-        errors: undefined;
-        formValues: undefined;
-      };
-    }
-  | {
-      value: { idle: "updating" };
-      context: EditorContext & {
-        article: Article;
-        formValues: FormValues;
-        slug: string;
-      };
-    }
-  | {
-      value: "submitting" | { submitting: "creating" };
-      context: EditorContext & {
-        formValues: FormValues;
-      };
-    }
-  | {
-      value: { submitting: "updating" };
-      context: EditorContext & {
-        article: Article;
-        formValues: FormValues;
-        slug: string;
-      };
-    }
-  | {
-      value: "success";
-      context: EditorContext & {
-        article: Article;
-        formValues: FormValues;
-      };
-    }
-  | {
-      value: "errored";
-      context: EditorContext & {
-        errors: Errors;
-        formValues: FormValues;
-      };
+    value: "idle" | { idle: "creating" };
+    context: {
+      article: undefined;
+      errors: undefined;
+      formValues: undefined;
     };
+  }
+  | {
+    value: { idle: "updating" };
+    context: EditorContext & {
+      article: Article;
+      formValues: FormValues;
+      slug: string;
+    };
+  }
+  | {
+    value: "submitting" | { submitting: "creating" };
+    context: EditorContext & {
+      formValues: FormValues;
+    };
+  }
+  | {
+    value: { submitting: "updating" };
+    context: EditorContext & {
+      article: Article;
+      formValues: FormValues;
+      slug: string;
+    };
+  }
+  | {
+    value: "success";
+    context: EditorContext & {
+      article: Article;
+      formValues: FormValues;
+    };
+  }
+  | {
+    value: "errored";
+    context: EditorContext & {
+      errors: Errors;
+      formValues: FormValues;
+    };
+  };
 
 export const editorMachine = createMachine<
-  EditorContext,
-  EditorEvent,
+  ContextFrom<typeof editorModel>,
+  EventFrom<typeof editorModel>,
   EditorState
 >(
   {
     id: "editor",
     initial: "idle",
+    context: editorModel.initialContext,
     states: {
       idle: {
         initial: "choosing",
@@ -104,7 +99,7 @@ export const editorMachine = createMachine<
           },
           creating: {
             on: {
-              SUBMIT: {
+              submit: {
                 target: "#editor.submitting.creating",
                 actions: "assignValues"
               }
@@ -119,7 +114,7 @@ export const editorMachine = createMachine<
               }
             },
             on: {
-              SUBMIT: {
+              submit: {
                 target: "#editor.submitting.updating",
                 actions: "assignValues"
               }
@@ -164,7 +159,7 @@ export const editorMachine = createMachine<
       errored: {
         id: "errored",
         on: {
-          SUBMIT: {
+          submit: {
             target: "submitting",
             actions: "assignValues"
           }
@@ -174,44 +169,34 @@ export const editorMachine = createMachine<
   },
   {
     actions: {
-      assignArticleValues: assign({
-        article: (context, event) => {
-          if (event.type === "done.invoke.getArticle")
-            return event.data.article;
-          return context.article;
+      assignArticleValues: editorModel.assign({
+        article: (_, event) => {
+          return event.data.article;
         },
-        formValues: (context, event) => {
-          if (event.type === "done.invoke.getArticle") {
-            return {
-              title: event.data.article.title,
-              description: event.data.article.description,
-              body: event.data.article.body,
-              tagList: event.data.article.tagList
-            };
-          }
-          return context.formValues;
+        formValues: (_, event) => {
+          return {
+            title: event.data.article.title,
+            description: event.data.article.description,
+            body: event.data.article.body,
+            tagList: event.data.article.tagList
+          };
         }
-      }),
-      assignData: assign({
-        article: (context, event) => {
-          if (event.type === "done.invoke.articleRequest") {
-            return event.data.article;
-          }
-          return context.article;
+      }, 'done.invoke.getArticle'),
+      assignData: editorModel.assign({
+        article: (_, event) => {
+          return event.data.article;
         }
-      }),
-      assignErrors: assign({
-        errors: (context, event) => {
-          if (event.type === "error.platform") return event.data.errors;
-          return context.errors;
+      }, 'done.invoke.articleRequest'),
+      assignErrors: editorModel.assign({
+        errors: (_, event) => {
+          return event.data.errors;
         }
-      }),
-      assignValues: assign({
-        formValues: (context, event) => {
-          if (event.type === "SUBMIT") return event.values;
-          return context.formValues;
+      }, 'error.platform'),
+      assignValues: editorModel.assign({
+        formValues: (_, event) => {
+          return event.values;
         }
-      }),
+      }, 'submit'),
       goToArticle: context => history.push(`/article/${context.article?.slug}`)
     },
     guards: {

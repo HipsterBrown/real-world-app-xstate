@@ -1,23 +1,26 @@
 import {
   createMachine,
-  assign,
   actions,
   spawn,
   ActorRef,
-  EventObject
+  EventObject,
+  EventFrom,
+  ContextFrom,
 } from "xstate";
+import { createModel } from 'xstate/lib/model';
 import { get, del, post } from "../utils/api-client";
 import { history } from "../utils/history";
 import type {
   Article,
   ArticleListResponse,
   ArticleResponse,
-  Errors
+  Errors,
+  ErrorsFrom
 } from "../types/api";
 
 const { choose } = actions;
 
-export type FeedContext = {
+type FeedContext = {
   articles?: Article[];
   articlesCount?: number;
   errors?: Errors;
@@ -32,91 +35,75 @@ export type FeedContext = {
   favoriteRef?: ActorRef<EventObject>;
 };
 
-export type FeedEvent =
-  | {
-      type: "done.invoke.getFeed";
-      data: ArticleListResponse;
-    }
-  | {
-      type: "done.invoke.favoriting";
-      data: ArticleResponse;
-    }
-  | {
-      type: "error.platform";
-      data: { errors: Errors };
-    }
-  | {
-      type: "RETRY" | "REFRESH";
-    }
-  | {
-      type: "UPDATE_FEED";
-      offset: number;
-      limit: number;
-      feed?: string;
-      author?: string;
-      tag?: string;
-      favorited?: string;
-    }
-  | {
-      type: "TOGGLE_FAVORITE";
-      slug: string;
-    };
+const initialContext: FeedContext = {
+  articles: undefined,
+  articlesCount: undefined,
+  errors: undefined,
+  params: {
+    limit: 20,
+    offset: 0
+  }
+}
 
-export type FeedState =
-  | {
-      value: "loading";
-      context: FeedContext & {
-        articles: undefined;
-        articlesCount: undefined;
-        errors: undefined;
-      };
-    }
-  | {
-      value: "feedLoaded";
-      context: FeedContext & {
-        articles: Article[] | [];
-        articlesCount: number;
-        errors: undefined;
-      };
-    }
-  | {
-      value: { feedLoaded: "articlesAvailable" };
-      context: FeedContext & {
-        articles: Article[];
-        articlesCount: number;
-        errors: undefined;
-      };
-    }
-  | {
-      value: { feedLoaded: "noArticles" };
-      context: FeedContext & {
-        articles: [];
-        articlesCount: 0;
-        errors: undefined;
-      };
-    }
-  | {
-      value: "failedLoadingFeed";
-      context: FeedContext & {
-        articles: undefined;
-        articlesCount: undefined;
-        errors: Errors;
-      };
-    };
+export const feedModel = createModel(initialContext, {
+  events: {
+    'done.invoke.getFeed': (data: ArticleListResponse) => ({ data }),
+    'done.invoke.favoriting': (data: ArticleResponse) => ({ data }),
+    'error.platform': (data: ErrorsFrom<ArticleResponse | ArticleListResponse>) => ({ data }),
+    'retry': () => ({}),
+    'refresh': () => ({}),
+    'updateFeed': (params: FeedContext['params']) => params,
+    'toggleFavorite': (slug: string) => ({ slug }),
+  }
+})
 
-export const feedMachine = createMachine<FeedContext, FeedEvent, FeedState>(
+type FeedState =
+  | {
+    value: "loading";
+    context: FeedContext & {
+      articles: undefined;
+      articlesCount: undefined;
+      errors: undefined;
+    };
+  }
+  | {
+    value: "feedLoaded";
+    context: FeedContext & {
+      articles: Article[] | [];
+      articlesCount: number;
+      errors: undefined;
+    };
+  }
+  | {
+    value: { feedLoaded: "articlesAvailable" };
+    context: FeedContext & {
+      articles: Article[];
+      articlesCount: number;
+      errors: undefined;
+    };
+  }
+  | {
+    value: { feedLoaded: "noArticles" };
+    context: FeedContext & {
+      articles: [];
+      articlesCount: 0;
+      errors: undefined;
+    };
+  }
+  | {
+    value: "failedLoadingFeed";
+    context: FeedContext & {
+      articles: undefined;
+      articlesCount: undefined;
+      errors: Errors;
+    };
+  };
+
+export const feedMachine = createMachine<ContextFrom<typeof feedModel>, EventFrom<typeof feedModel>, FeedState>(
   {
     id: "feed-loader",
     initial: "loading",
-    context: {
-      articles: undefined,
-      articlesCount: undefined,
-      errors: undefined,
-      params: {
-        limit: 20,
-        offset: 0
-      }
-    },
+    context: feedModel.initialContext,
     states: {
       loading: {
         invoke: {
@@ -150,12 +137,12 @@ export const feedMachine = createMachine<FeedContext, FeedEvent, FeedState>(
           articlesAvailable: {}
         },
         on: {
-          REFRESH: "loading",
-          UPDATE_FEED: {
+          refresh: "loading",
+          updateFeed: {
             target: "loading",
             actions: "updateParams"
           },
-          TOGGLE_FAVORITE: {
+          toggleFavorite: {
             actions: choose([
               {
                 cond: "notAuthenticated",
@@ -177,104 +164,88 @@ export const feedMachine = createMachine<FeedContext, FeedEvent, FeedState>(
       },
       failedLoadingFeed: {
         on: {
-          RETRY: "loading"
+          retry: "loading"
         }
       }
     }
   },
   {
     actions: {
-      assignArticleData: assign({
+      assignArticleData: feedModel.assign({
         articles: (context, event) => {
-          if (event.type === "done.invoke.favoriting") {
-            const data = event.data.article;
-            return context.articles?.map(article =>
-              article.slug === data.slug ? data : article
-            );
-          }
-          return context.articles;
+          const data = event.data.article;
+          return context.articles?.map(article =>
+            article.slug === data.slug ? data : article
+          );
         }
-      }),
-      assignData: assign((context, event) => {
-        if (event.type === "done.invoke.getFeed") {
-          return {
-            ...context,
-            ...event.data
-          };
+      }, 'done.invoke.favoriting'),
+      assignData: feedModel.assign((context, event) => {
+        return {
+          ...context,
+          ...event.data
+        };
+      }, 'done.invoke.getFeed'),
+      assignErrors: feedModel.assign({
+        errors: (_, event) => {
+          return event.data.errors;
         }
-        return context;
-      }),
-      assignErrors: assign({
-        errors: (context, event) => {
-          if (event.type === "error.platform") return event.data.errors;
-          return context.errors;
-        }
-      }),
-      clearErrors: assign<FeedContext, FeedEvent>({ errors: undefined }),
+      }, 'error.platform'),
+      clearErrors: feedModel.assign({ errors: undefined }),
       goToSignup: () => history.push("/register"),
-      deleteFavorite: assign((context, event) => {
-        if (event.type === "TOGGLE_FAVORITE") {
-          const articles = context.articles?.map(article => {
-            if (article.slug === event.slug) {
-              return {
-                ...article,
-                favorited: false,
-                favoritesCount: article.favoritesCount - 1
-              };
-            }
-            return article;
-          });
-          return {
-            ...context,
-            articles,
-            favoriteRef: spawn(
-              del<ArticleResponse>(`articles/${event.slug}/favorite`),
-              "favoriting"
-            )
-          };
-        }
-        return context;
-      }),
-      favoriteArticle: assign((context, event) => {
-        if (event.type === "TOGGLE_FAVORITE") {
-          const articles = context.articles?.map(article => {
-            if (article.slug === event.slug) {
-              return {
-                ...article,
-                favorited: true,
-                favoritesCount: article.favoritesCount + 1
-              };
-            }
-            return article;
-          });
-          return {
-            ...context,
-            articles,
-            favoriteRef: spawn(
-              post<ArticleResponse>(
-                `articles/${event.slug}/favorite`,
-                undefined
-              ),
-              "favoriting"
-            )
-          };
-        }
-        return context;
-      }),
-      updateParams: assign((context, event) => {
-        if (event.type === "UPDATE_FEED") {
-          return {
-            ...context,
-            params: event
-          };
-        }
-        return context;
-      })
+      deleteFavorite: feedModel.assign((context, event) => {
+        const articles = context.articles?.map(article => {
+          if (article.slug === event.slug) {
+            return {
+              ...article,
+              favorited: false,
+              favoritesCount: article.favoritesCount - 1
+            };
+          }
+          return article;
+        });
+        return {
+          ...context,
+          articles,
+          favoriteRef: spawn(
+            del<ArticleResponse>(`articles/${event.slug}/favorite`),
+            "favoriting"
+          )
+        };
+      }, 'toggleFavorite'),
+      favoriteArticle: feedModel.assign((context, event) => {
+        const articles = context.articles?.map(article => {
+          if (article.slug === event.slug) {
+            return {
+              ...article,
+              favorited: true,
+              favoritesCount: article.favoritesCount + 1
+            };
+          }
+          return article;
+        });
+        return {
+          ...context,
+          articles,
+          favoriteRef: spawn(
+            post<ArticleResponse>(
+              `articles/${event.slug}/favorite`,
+              undefined
+            ),
+            "favoriting"
+          )
+        };
+      }, 'toggleFavorite'),
+      updateParams: feedModel.assign((context, event) => {
+        return {
+          ...context,
+          params: event
+        };
+      }, 'updateFeed')
     },
     guards: {
       dataIsEmpty: context => context.articles?.length === 0,
       articleIsFavorited: (context, event) =>
-        event.type === "TOGGLE_FAVORITE" &&
+        event.type === "toggleFavorite" &&
         !!context.articles?.find(
           article => article.slug === event.slug && article.favorited
         )
@@ -292,7 +263,7 @@ export const feedMachine = createMachine<FeedContext, FeedEvent, FeedState>(
 
         return get<ArticleListResponse>(
           (context.params.feed === "me" ? "articles/feed?" : "articles?") +
-            params.toString()
+          params.toString()
         );
       }
     }

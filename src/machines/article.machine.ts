@@ -1,10 +1,11 @@
 import {
   createMachine,
   actions,
-  assign,
   spawn,
   ActorRef,
-  EventObject
+  EventObject,
+  EventFrom,
+  ContextFrom,
 } from "xstate";
 import { get, post, del } from "../utils/api-client";
 import { history } from "../utils/history";
@@ -14,9 +15,10 @@ import type {
   CommentListResponse,
   CommentResponse,
   Comment,
-  Errors,
+  ErrorsFrom,
   ProfileResponse
 } from "../types/api";
+import { createModel } from "xstate/lib/model";
 
 const { choose } = actions;
 
@@ -31,232 +33,197 @@ type ArticleContext = {
   followingRef?: ActorRef<EventObject>;
 };
 
-type ArticleEvent =
-  | {
-      type: "done.invoke.getArticle";
-      data: ArticleResponse;
-    }
-  | {
-      type: "error.platform";
-      data: { errors: Errors };
-    }
-  | {
-      type: "done.invoke.deletingArticle";
-    }
-  | {
-      type: "done.invoke.getComments";
-      data: CommentListResponse;
-    }
-  | {
-      type: "done.invoke.creatingComment";
-      data: CommentResponse;
-    }
-  | {
-      type: "CREATE_COMMENT";
-      comment: { body: string };
-    }
-  | {
-      type: "TOGGLE_FOLLOW";
-      username: string;
-    }
-  | {
-      type: "TOGGLE_FAVORITE";
-    }
-  | {
-      type: "DELETE_ARTICLE";
-    }
-  | {
-      type: "DELETE_COMMENT";
-      id: Comment["id"];
-    }
-  | {
-      type: "done.invoke.favoriting";
-      data: ArticleResponse;
-    }
-  | {
-      type: "done.invoke.following";
-      data: ProfileResponse;
-    };
+const initialContext: ArticleContext = {
+  slug: '',
+}
+
+export const articleModel = createModel(initialContext, {
+  events: {
+    'error.platform': (data: ErrorsFrom<ArticleResponse | CommentListResponse | CommentResponse | ProfileResponse>) => ({ data }),
+    'done.invoke.getArticle': (data: ArticleResponse) => ({ data }),
+    'done.invoke.deletingArticle': () => ({}),
+    'done.invoke.getComments': (data: CommentListResponse) => ({ data }),
+    'done.invoke.creatingComment': (data: CommentResponse) => ({ data }),
+    'done.invoke.favoriting': (data: ArticleResponse) => ({ data }),
+    'done.invoke.following': (data: ProfileResponse) => ({ data }),
+    'CREATE_COMMENT': (comment: { body: string }) => ({ comment }),
+    'TOGGLE_FOLLOW': (username: string) => ({ username }),
+    'TOGGLE_FAVORITE': () => ({}),
+    'DELETE_ARTICLE': () => ({}),
+    'DELETE_COMMENT': (id: Comment['id']) => ({ id }),
+  }
+})
 
 type ArticleState =
   | {
-      value:
-        | "article"
-        | { article: "fetching" }
-        | "comments"
-        | { comments: "fetching" };
-      context: ArticleContext & {
-        article: undefined;
-        comments: undefined;
-      };
-    }
-  | {
-      value: { article: "hasContent" };
-      context: ArticleContext & {
-        article: Article;
-      };
-    }
-  | {
-      value: { comments: "hasContent" };
-      context: ArticleContext & {
-        comments: Comment[];
-      };
-    }
-  | {
-      value: { comments: "noContent" };
-      context: ArticleContext & {
-        comments: [];
-      };
+    value:
+    | "article"
+    | { article: "fetching" }
+    | "comments"
+    | { comments: "fetching" };
+    context: ArticleContext & {
+      article: undefined;
+      comments: undefined;
     };
+  }
+  | {
+    value: { article: "hasContent" };
+    context: ArticleContext & {
+      article: Article;
+    };
+  }
+  | {
+    value: { comments: "hasContent" };
+    context: ArticleContext & {
+      comments: Comment[];
+    };
+  }
+  | {
+    value: { comments: "noContent" };
+    context: ArticleContext & {
+      comments: [];
+    };
+  };
 
-export const articleMachine = createMachine<
-  ArticleContext,
-  ArticleEvent,
-  ArticleState
->(
-  {
-    id: "article",
-    type: "parallel",
-    states: {
-      article: {
-        initial: "fetching",
-        states: {
-          fetching: {
-            invoke: {
-              id: "getArticle",
-              src: "getArticle",
-              onDone: {
-                target: "hasContent",
-                actions: "assignArticleData"
-              }
-            }
-          },
-          hasContent: {
-            on: {
-              TOGGLE_FOLLOW: {
-                actions: choose([
+export const articleMachine =
+  /** @xstate-layout N4IgpgJg5mDOIC5QEMBOAXAlgYwDZgDo0s9CAzMdbAC0wDsoBiCAezsPoDcWBrQmdAEEMOfIlAAHFrExY24kAA9EAJhUBWAgBYdAZl3qAnLoDs6gDQgAnonUAOAGwEAjCYe6ADM8MrD73SoAvoGWxKKEYaQE1MiwAMJs6GB06IwAKgDyAOJZADIAogD6AGIZubkZAOoKUjJydArKCFoqJgSG6irO+rqGzh5GhpY2COrdBL69Js5aXh526g7BoSJRkfjRsQkpyamZOQUlggBqGQBKAJJp+TXSspjySEqILboEDlomWovzunYefl0wxeHjekw6dhMdhmhg8JmWIHWEVWGxi8USu2YbA4dG4fAIZGQ3FQ9wYtzqDwaTyaLU0i2MBm+XV0zmBCBZbXBdm5X1MAK0CKRRBRhDR2ySKUYABF8gVroVBGc0hc4gVyfdHqAaSz3r1-P4vjotGyVHCJsZDG4NJ83IKRcKSKithjJax2AQuLxCBAwPgsAxhI6wOr6o0XupNAY7LMtIY7IY4yo2c4uubZh53J8HIsNHagwRsCwALZF3awAmUGj0JhunF4-iUBIlsshylhhAqBzOCbqTx2NRmXoZtnc7v9-TOaE29QCkKI+2F5spctil2pOJnfKCeVxDIAWT3+QAcmlW5rnqMdT5YzPdO5XB9k10tNoPuppiZLSZfM48+EC8WpbLps6I7JKMpykUu4Hsep5PLUGpUlqqgJhMGZdBm36Wn8xrWIgziToYBDjgY6igvYXh-lEi5Aeg5Z0Cw4qYhuW47vuh4nmeSEXp23YaH2A69rCDjJrGbQkX0Pg4bac5CjRZZYu6nr4tgqBgMg-pQE2tFce2vhOJ+GYpgslpwh4uEjCYd4uG4LLfLGah2MEc4MT68BPEKQoUFQtBkvBdyhtSiDfmyXYeAQnT3lougtIYWgOEEsn2kKq5gegulBc0bjtH8oIEfZoKhSodjmr00YeKaDj-EsSX5kiGXIc0dhsloJXgr0d4OFhLJURs8nAd5VZ+ZIAVtplJgmMmHgDDZ+gtA4HSTL+tX-v1dEgUxKQNRe9htJOLQTSoswOACSZ4Qg3S+K+3zRlorgBC0vWEGt9GMWu21NM47jtCoD39n0Xg5smAREa00X9kYOhwjVKz5i9H22EC53-CV44aARDhVa0T0Ix2FmIAAtEdBAmEZrRdndloJTVwRAA */
+  createMachine<
+    ContextFrom<typeof articleModel>,
+    EventFrom<typeof articleModel>,
+    ArticleState
+  >(
+    {
+      id: "article",
+      type: "parallel",
+      states: {
+        article: {
+          initial: "fetching",
+          states: {
+            fetching: {
+              invoke: {
+                src: "getArticle",
+                id: "getArticle",
+                onDone: [
                   {
-                    actions: "goToSignup",
-                    cond: "notAuthenticated"
+                    actions: "assignArticleData",
+                    target: "#article.article.hasContent",
                   },
-                  {
-                    actions: "followAuthor",
-                    cond: "notFollowing"
-                  },
-                  {
-                    actions: "unfollowAuthor"
-                  }
-                ])
+                ],
               },
-              TOGGLE_FAVORITE: {
-                actions: choose([
-                  {
-                    actions: "goToSignup",
-                    cond: "notAuthenticated"
-                  },
-                  {
-                    actions: "deleteFavorite",
-                    cond: "articleIsFavorited"
-                  },
-                  {
-                    actions: "favoriteArticle"
-                  }
-                ])
-              },
-              "done.invoke.favoriting": {
-                actions: "assignArticleData"
-              },
-              DELETE_ARTICLE: {
-                actions: "deleteArticle"
-              },
-              "done.invoke.deletingArticle": {
-                actions: "goHome"
-              }
-            }
-          }
-        }
-      },
-      comments: {
-        initial: "fetching",
-        states: {
-          fetching: {
-            invoke: {
-              id: "getComments",
-              src: "getComments",
-              onDone: [
-                {
-                  target: "hasContent",
-                  cond: "hasCommentContent",
-                  actions: "assignCommentData"
+            },
+            hasContent: {
+              on: {
+                TOGGLE_FOLLOW: {
+                  actions: choose([
+                    {
+                      actions: "goToSignup",
+                      cond: "notAuthenticated",
+                    },
+                    {
+                      actions: "followAuthor",
+                      cond: "notFollowing",
+                    },
+                    {
+                      actions: "unfollowAuthor",
+                    },
+                  ]),
+                  target: "#article.article.hasContent",
                 },
-                {
-                  target: "noContent",
-                  actions: "assignCommentData"
-                }
-              ]
-            }
-          },
-          hasContent: {
-            on: {
-              CREATE_COMMENT: {
-                actions: "createComment"
-              },
-              DELETE_COMMENT: [
-                {
-                  target: "noContent",
-                  cond: "isOnlyComment",
-                  actions: "deleteComment"
+                TOGGLE_FAVORITE: {
+                  actions: choose([
+                    {
+                      actions: "goToSignup",
+                      cond: "notAuthenticated",
+                    },
+                    {
+                      actions: "deleteFavorite",
+                      cond: "articleIsFavorited",
+                    },
+                    {
+                      actions: "favoriteArticle",
+                    },
+                  ]),
+                  target: "#article.article.hasContent",
                 },
-                {
-                  actions: "deleteComment"
-                }
-              ]
-            }
+                DELETE_ARTICLE: {
+                  actions: "deleteArticle",
+                  target: "#article.article.hasContent",
+                },
+              },
+            },
           },
-          noContent: {
-            on: {
-              CREATE_COMMENT: {
-                target: "hasContent",
-                actions: "createComment"
-              }
-            }
-          }
         },
-        on: {
-          "done.invoke.creatingComment": {
-            actions: "assignNewComment"
-          }
-        }
-      }
-    }
-  },
-  {
-    actions: {
-      assignArticleData: assign({
-        article: (context, event) => {
-          if (event.type === "done.invoke.getArticle") {
+        comments: {
+          initial: "fetching",
+          states: {
+            fetching: {
+              invoke: {
+                src: "getComments",
+                id: "getComments",
+                onDone: [
+                  {
+                    actions: "assignCommentData",
+                    cond: "hasCommentContent",
+                    target: "#article.comments.hasContent",
+                  },
+                  {
+                    actions: "assignCommentData",
+                    target: "#article.comments.noContent",
+                  },
+                ],
+              },
+            },
+            hasContent: {
+              on: {
+                CREATE_COMMENT: {
+                  actions: "createComment",
+                  target: "#article.comments.hasContent",
+                },
+                DELETE_COMMENT: [
+                  {
+                    actions: "deleteComment",
+                    cond: "isOnlyComment",
+                    target: "#article.comments.noContent",
+                  },
+                  {
+                    actions: "deleteComment",
+                    target: "#article.comments.hasContent",
+                  },
+                ],
+              },
+            },
+            noContent: {
+              on: {
+                CREATE_COMMENT: {
+                  actions: "createComment",
+                  target: "#article.comments.hasContent",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      actions: {
+        assignArticleData: articleModel.assign({
+          article: (_, event) => {
             return event.data.article;
           }
-          return context.article;
-        }
-      }),
-      assignCommentData: assign({
-        comments: (context, event) => {
-          if (event.type === "done.invoke.getComments") {
+        }, 'done.invoke.getArticle'),
+        assignCommentData: articleModel.assign({
+          comments: (_, event) => {
             return event.data.comments;
           }
-          return context.comments;
-        }
-      }),
-      goToSignup: () => history.push("/register"),
-      goHome: () => history.push("/"),
-      deleteArticle: assign({
-        deletingRef: context =>
-          spawn(del(`articles/${context.slug}`), "deletingArticle")
-      }),
-      createComment: assign({
-        creatingCommentRef: (context, event) => {
-          if (event.type === "CREATE_COMMENT") {
+        }, 'done.invoke.getComments'),
+        goToSignup: () => history.push("/register"),
+        goHome: () => history.push("/"),
+        deleteArticle: articleModel.assign({
+          deletingRef: context =>
+            spawn(del(`articles/${context.slug}`), "deletingArticle")
+        }),
+        createComment: articleModel.assign({
+          creatingCommentRef: (context, event) => {
             return spawn(
               post<CommentResponse, { comment: Pick<Comment, "body"> }>(
                 `articles/${context.slug}/comments`,
@@ -265,11 +232,8 @@ export const articleMachine = createMachine<
               "creatingComment"
             );
           }
-          return context.creatingCommentRef;
-        }
-      }),
-      deleteComment: assign((context, event) => {
-        if (event.type === "DELETE_COMMENT") {
+        }, 'CREATE_COMMENT'),
+        deleteComment: articleModel.assign((context, event) => {
           return {
             ...context,
             deletingCommentRef: spawn(
@@ -278,11 +242,8 @@ export const articleMachine = createMachine<
             comments:
               context.comments?.filter(comment => comment.id === event.id) || []
           };
-        }
-        return context;
-      }),
-      deleteFavorite: assign((context, event) => {
-        if (event.type === "TOGGLE_FAVORITE") {
+        }, 'DELETE_COMMENT'),
+        deleteFavorite: articleModel.assign((context) => {
           const article: Article = {
             ...context.article!,
             favorited: false,
@@ -297,11 +258,8 @@ export const articleMachine = createMachine<
               "favoriting"
             )
           };
-        }
-        return context;
-      }),
-      favoriteArticle: assign((context, event) => {
-        if (event.type === "TOGGLE_FAVORITE") {
+        }, 'TOGGLE_FAVORITE'),
+        favoriteArticle: articleModel.assign((context) => {
           const article: Article = {
             ...context.article!,
             favorited: true,
@@ -318,11 +276,8 @@ export const articleMachine = createMachine<
               "favoriting"
             )
           };
-        }
-        return context;
-      }),
-      followAuthor: assign((context, event) => {
-        if (event.type === "TOGGLE_FOLLOW") {
+        }, 'TOGGLE_FAVORITE'),
+        followAuthor: articleModel.assign((context, event) => {
           return {
             ...context,
             followingRef: spawn(
@@ -339,11 +294,8 @@ export const articleMachine = createMachine<
               }
             }
           };
-        }
-        return context;
-      }),
-      unfollowAuthor: assign((context, event) => {
-        if (event.type === "TOGGLE_FOLLOW") {
+        }, 'TOGGLE_FOLLOW'),
+        unfollowAuthor: articleModel.assign((context, event) => {
           return {
             ...context,
             followingRef: spawn(
@@ -357,33 +309,28 @@ export const articleMachine = createMachine<
               }
             }
           };
-        }
-        return context;
-      }),
-      assignNewComment: assign({
-        comments: (context, event) => {
-          if (event.type === "done.invoke.creatingComment") {
+        }, 'TOGGLE_FOLLOW'),
+        assignNewComment: articleModel.assign({
+          comments: (context, event) => {
             return [event.data.comment].concat(context.comments!);
           }
-          return context.comments;
-        }
-      })
-    },
-    guards: {
-      hasCommentContent: (_context, event) => {
-        if (event.type === "done.invoke.getComments") {
-          return !!event.data.comments.length;
-        }
-        return false;
+        }, 'done.invoke.creatingComment')
       },
-      isOnlyComment: context => context.comments?.length === 1,
-      notFollowing: context => !context.article?.author?.following,
-      articleIsFavorited: context => !!context.article?.favorited
-    },
-    services: {
-      getArticle: context => get<ArticleResponse>(`articles/${context.slug}`),
-      getComments: context =>
-        get<CommentListResponse>(`articles/${context.slug}/comments`)
+      guards: {
+        hasCommentContent: (_context, event) => {
+          if (event.type === "done.invoke.getComments") {
+            return !!event.data.comments.length;
+          }
+          return false;
+        },
+        isOnlyComment: context => context.comments?.length === 1,
+        notFollowing: context => !context.article?.author?.following,
+        articleIsFavorited: context => !!context.article?.favorited
+      },
+      services: {
+        getArticle: context => get<ArticleResponse>(`articles/${context.slug}`),
+        getComments: context =>
+          get<CommentListResponse>(`articles/${context.slug}/comments`)
+      }
     }
-  }
-);
+  );

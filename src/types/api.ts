@@ -1,5 +1,7 @@
 export type Errors = Record<string, string[]>;
 
+export type ErrorsFrom<Response extends { errors?: Errors }> = Required<Pick<Response, 'errors'>>;
+
 export interface User {
   email: string;
   token: string;

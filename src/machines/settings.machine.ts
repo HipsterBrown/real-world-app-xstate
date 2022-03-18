@@ -1,28 +1,10 @@
-import { createMachine, assign } from "xstate";
+import { createMachine, ContextFrom, EventFrom } from "xstate";
+import { createModel } from 'xstate/lib/model'
 import { history } from "../utils/history";
 import { put } from "../utils/api-client";
-import type { User, UserResponse, Errors } from "../types/api";
+import type { User, UserResponse, Errors, ErrorsFrom } from "../types/api";
 
-export type SettingsContext = {
-  user: User | null;
-  errors: Errors | null;
-};
-
-export type SettingsEvent =
-  | {
-      type: "SUBMIT";
-      values: User;
-    }
-  | {
-      type: "done.invoke.updateUser";
-      data: UserResponse;
-    }
-  | {
-      type: "error.platform";
-      data: { errors: Errors };
-    };
-
-export type SettingsState = {
+type SettingsState = {
   value: 'idle';
   context: {
     user: null;
@@ -48,18 +30,26 @@ export type SettingsState = {
   };
 }
 
-export const settingsMachine = createMachine<SettingsContext, SettingsEvent, SettingsState>(
+export const settingsModel = createModel({
+  user: null as User | null,
+  errors: null as Errors | null,
+}, {
+  events: {
+    submit: (values: User) => ({ values }),
+    'done.invoke.updateUser': (data: UserResponse) => ({ data }),
+    'error.platform.updateUser': (data: ErrorsFrom<UserResponse>) => ({ data })
+  }
+})
+
+export const settingsMachine = createMachine<ContextFrom<typeof settingsModel>, EventFrom<typeof settingsModel>, SettingsState>(
   {
     id: "settings-request",
     initial: "idle",
-    context: {
-      user: null,
-      errors: null
-    },
+    context: settingsModel.initialContext,
     states: {
       idle: {
         on: {
-          SUBMIT: {
+          submit: {
             target: "submitting",
             actions: "assignFormValues"
           }
@@ -80,12 +70,12 @@ export const settingsMachine = createMachine<SettingsContext, SettingsEvent, Set
         }
       },
       success: {
-        onEntry: ["updateParent", "goToProfile"]
+        entry: ["updateParent", "goToProfile"]
       },
       failed: {
-        onExit: "clearErrors",
+        exit: "clearErrors",
         on: {
-          SUBMIT: {
+          submit: {
             target: "submitting",
             actions: "assignFormValues"
           }
@@ -95,21 +85,18 @@ export const settingsMachine = createMachine<SettingsContext, SettingsEvent, Set
   },
   {
     actions: {
-      assignFormValues: assign({ user: (context, event) => {
-        if (event.type === 'SUBMIT') return event.values;
-        return context.user;
-      }}),
-      assignData: assign({ user: (context, event) => {
-        if (event.type === 'done.invoke.updateUser') return event.data.user;
-        return context.user;
-      }}),
-      assignErrors: assign({ errors: (context, event) => {
-        if (event.type === 'error.platform') return event.data.errors;
-        return context.errors;
-      }}),
+      assignFormValues: settingsModel.assign({
+        user: (_, event) => event.values,
+      }, 'submit'),
+      assignData: settingsModel.assign({
+        user: (_, event) => event.data.user,
+      }, 'done.invoke.updateUser'),
+      assignErrors: settingsModel.assign({
+        errors: (_, event) => event.data.errors,
+      }, 'error.platform.updateUser'),
       goToProfile: context =>
         history.push(`/profile/${context.user?.username}`),
-      clearErrors: assign<SettingsContext, SettingsEvent>({ errors: null })
+      clearErrors: settingsModel.assign({ errors: null })
     },
     services: {
       userRequest: ({ user }) =>

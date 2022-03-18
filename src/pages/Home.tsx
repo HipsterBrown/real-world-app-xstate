@@ -5,7 +5,7 @@ import { isProd } from "../utils/env";
 import { Tag } from "../components/Tag";
 import { Pagination } from "../components/Pagination";
 import { ArticlePreview } from "../components/Article";
-import { feedMachine } from "../machines/feed.machine";
+import { feedMachine, feedModel } from "../machines/feed.machine";
 import { tagsMachine } from "../machines/tags.machine";
 
 type HomeProps = {
@@ -44,15 +44,14 @@ export const Home: React.FC<HomeProps> = ({ isAuthenticated }) => {
 
   React.useEffect(() => {
     if (current.matches("feedLoaded")) {
-      send({
-        type: "UPDATE_FEED",
+      send(feedModel.events.updateFeed({
         offset,
         limit,
         feed,
         author,
         tag,
         favorited
-      });
+      }));
     }
   }, [send, offset, feed, author, tag, favorited, limit]);
 
@@ -128,7 +127,7 @@ export const Home: React.FC<HomeProps> = ({ isAuthenticated }) => {
                     {...article}
                     onFavorite={slug => {
                       if (slug) {
-                        send({ type: "TOGGLE_FAVORITE", slug });
+                        send(feedModel.events.toggleFavorite(slug));
                       }
                     }}
                   />

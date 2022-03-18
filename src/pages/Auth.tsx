@@ -4,7 +4,7 @@ import { object, string } from "yup";
 import { Link } from "react-router-dom";
 import { ActorRefFrom } from "xstate";
 import { useActor } from "@xstate/react";
-import { authMachine } from "../machines/auth.machine";
+import { authMachine, authModel } from "../machines/auth.machine";
 import { ErrorListItem } from "../components/ErrorListItem";
 import { mapErrors } from "../utils/errors";
 
@@ -55,7 +55,7 @@ export const Auth: React.FC<{
             <Formik<SignUpValues | LogInValues>
               initialValues={{ name: "", email: "", password: "" }}
               onSubmit={values => {
-                send({ type: "SUBMIT", ...values });
+                send(authModel.events.SUBMIT(values));
               }}
               validationSchema={mode === "signup" ? SignUpSchema : LogInSchema}
             >
