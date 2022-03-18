@@ -6,6 +6,7 @@ import {
   NavLink
 } from "react-router-dom";
 import { useMachine } from "@xstate/react";
+import clsx from 'clsx';
 import { isProd } from "../utils/env";
 import { feedMachine, feedModel } from "../machines/feed.machine";
 import { profileMachine, profileModel } from "../machines/profile.machine";
@@ -74,10 +75,7 @@ export const Profile: React.FC<ProfileProps> = ({ isAuthenticated }) => {
                 <h4>{profile.username}</h4>
                 <p>{profile.bio}</p>
                 <button
-                  className={`btn btn-sm ${profile.following
-                    ? "btn-secondary"
-                    : "btn-outline-secondary"
-                    } action-btn`}
+                  className={clsx('btn btn-sm action-btn', { 'btn-secondary': profile.following, 'btn-outline-secondary': !profile.following })}
                   onClick={() => send(profileModel.events.toggleFollowing())}
                 >
                   <i className="ion-plus-round"></i>

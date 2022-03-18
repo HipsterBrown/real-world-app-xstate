@@ -1,5 +1,6 @@
 import * as React from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import clsx from 'clsx';
 
 type PaginationProps = {
   pageCount: number;
@@ -25,7 +26,7 @@ export const Pagination: React.FC<PaginationProps> = ({
 
           return (
             <li
-              className={`page-item ${offset === linkOffset ? "active" : ""}`}
+              className={clsx('page-item', offset === linkOffset && 'active')}
               key={pageNum}
             >
               <NavLink to={`?${linkParams.toString()}`} className="page-link">

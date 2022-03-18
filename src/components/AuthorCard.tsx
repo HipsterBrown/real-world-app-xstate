@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
+import clsx from 'clsx';
 import type { Profile } from "../types/api";
 import { formatDate } from "../utils/dates";
 
@@ -40,9 +41,7 @@ export const AuthorCard: React.FC<AuthorCardProps> = ({
       </div>
       {variant !== "currentAuthor" && onFollow && (
         <button
-          className={`btn ${
-            following ? "btn-secondary" : "btn-outline-secondary"
-          } btn-sm`}
+          className={clsx('btn btn-sm', { 'btn-secondary': following, 'btn-outline-secondary': !following })}
           type="button"
           onClick={() => onFollow(username)}
         >
@@ -69,9 +68,11 @@ export const AuthorCard: React.FC<AuthorCardProps> = ({
       )}
       {variant !== "currentAuthor" && onFavorite && (
         <button
-          className={`btn ${
-            favorited ? "btn-primary" : "btn-outline-primary"
-          } btn-sm ${variant === "preview" ? "pull-xs-right" : ""}`}
+          className={clsx(
+            'btn btn-sm',
+            { 'btn-primary': favorited, 'btn-outline-primary': !favorited },
+            { 'pull-xs-right': variant === 'preview' }
+          )}
           type="button"
           onClick={() => onFavorite(slug)}
         >

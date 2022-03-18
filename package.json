@@ -24,6 +24,7 @@
   "homepage": "https://github.com/HipsterBrown/realworld-starter-kit#readme",
   "dependencies": {
     "@xstate/react": "^2.0.1",
+    "clsx": "^1.1.1",
     "dompurify": "^2.2.6",
     "formik": "^2.2.6",
     "history": "^4.10.1",
