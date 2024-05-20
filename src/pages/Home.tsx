@@ -5,9 +5,10 @@ import { isProd } from "../utils/env";
 import { Tag } from "../components/Tag";
 import { Pagination } from "../components/Pagination";
 import { ArticlePreview } from "../components/Article";
-import { feedMachine, feedModel } from "../machines/feed.machine";
+import { feedMachine } from "../machines/feed.machine";
 import { tagsMachine } from "../machines/tags.machine";
 import { useIsAuthenticated } from "../hooks/is-authenticated";
+import { inspect } from '../App';
 import clsx from "clsx";
 
 export const Home: React.FC = () => {
@@ -21,9 +22,13 @@ export const Home: React.FC = () => {
   const tag = params.get("tag") ?? undefined;
   const favorited = params.get("favorited") ?? undefined;
 
-  const [current, send] = useMachine(feedMachine, {
-    devTools: !isProd(),
-    context: {
+  const [current, send] = useMachine(feedMachine.provide({
+    guards: {
+      notAuthenticated: () => !isAuthenticated
+    }
+  }), {
+    inspect: isProd() ? inspect : undefined,
+    input: {
       params: {
         limit,
         offset,
@@ -33,24 +38,22 @@ export const Home: React.FC = () => {
         feed
       }
     },
-    guards: {
-      notAuthenticated: () => !isAuthenticated
-    }
   });
   const [currentTags] = useMachine(tagsMachine, {
-    devTools: !isProd()
+    inspect: isProd() ? inspect : undefined,
   });
 
   React.useEffect(() => {
     if (current.matches("feedLoaded")) {
-      send(feedModel.events.updateFeed({
+      send({
+        type: 'updateFeed',
         offset,
         limit,
         feed,
         author,
         tag,
         favorited
-      }));
+      })
     }
   }, [send, offset, feed, author, tag, favorited, limit]);
 
@@ -107,19 +110,19 @@ export const Home: React.FC = () => {
 
             {current.matches({ feedLoaded: "articlesAvailable" }) && (
               <>
-                {current.context.articles.map(article => (
+                {current.context.articles?.map(article => (
                   <ArticlePreview
                     key={article.slug}
                     {...article}
                     onFavorite={slug => {
                       if (slug) {
-                        send(feedModel.events.toggleFavorite(slug));
+                        send({ type: 'toggleFavorite', slug });
                       }
                     }}
                   />
                 ))}
                 <Pagination
-                  pageCount={Math.ceil(current.context.articlesCount / limit)}
+                  pageCount={Math.ceil((current.context.articlesCount ?? 0) / limit)}
                   limit={limit}
                   offset={offset}
                 />
@@ -141,7 +144,7 @@ export const Home: React.FC = () => {
 
               {currentTags.matches("tagsLoaded") && (
                 <div className="tag-list">
-                  {currentTags.context.tags.map(tag => (
+                  {currentTags.context.tags?.map(tag => (
                     <Tag key={tag}>{tag}</Tag>
                   ))}
                 </div>

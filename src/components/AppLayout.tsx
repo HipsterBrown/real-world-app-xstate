@@ -4,11 +4,12 @@ import { AppMachineContext } from '../App';
 import { UserState } from '../machines/app.machine';
 import { Footer } from './Footer';
 import { Header } from './Header';
+import { getStateValueStrings } from '../utils/states';
 
 export const AppLayout: React.FC = () => {
-  const [current] = AppMachineContext.useActor();
+  const current = AppMachineContext.useSelector(s => s);
   const userState =
-    (current.toStrings().find(state => state.includes("user.")) as UserState) ||
+    (getStateValueStrings(current.value).find(state => state.includes("user.")) as UserState) ||
     "user.unauthenticated";
   return (
     <>
