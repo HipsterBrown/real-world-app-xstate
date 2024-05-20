@@ -3,10 +3,11 @@ import { useMachine } from "@xstate/react";
 import { Formik, Form, Field } from "formik";
 import { object, string } from "yup";
 import { useParams } from "react-router-dom";
-import { editorMachine, editorModel } from "../machines/editor.machine";
+import { editorMachine } from "../machines/editor.machine";
 import { ErrorListItem } from "../components/ErrorListItem";
 import { mapErrors } from "../utils/errors";
 import { isProd } from "../utils/env";
+import { inspect } from '../App';
 
 const EditorSchema = object({
   title: string().required(),
@@ -17,8 +18,8 @@ const EditorSchema = object({
 export const Editor: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
   const [current, send] = useMachine(editorMachine, {
-    devTools: !isProd(),
-    context: {
+    inspect: isProd() ? inspect : undefined,
+    input: {
       slug
     }
   });
@@ -37,10 +38,12 @@ export const Editor: React.FC = () => {
               }}
               validationSchema={EditorSchema}
               onSubmit={values => {
-                send(editorModel.events.submit({
-                  ...values,
-                  tagList: values.tagList.split(",")
-                }));
+                send({
+                  type: 'submit', values: {
+                    ...values,
+                    tagList: values.tagList.split(",")
+                  }
+                });
               }}
               enableReinitialize={current.matches({ idle: "updating" })}
             >
@@ -50,7 +53,7 @@ export const Editor: React.FC = () => {
                   <ErrorListItem name="description" />
                   <ErrorListItem name="body" />
                   {current.matches("errored") &&
-                    mapErrors(current.context.errors).map(message => (
+                    mapErrors(current.context.errors!).map(message => (
                       <li key={message}>{message}</li>
                     ))}
                 </ul>

@@ -1,6 +1,6 @@
 import type { BaseResponse } from "../types/api";
 
-const BASE_URL = "https://conduit.productionready.io/api";
+const BASE_URL = "https://api.realworld.io/api";
 
 const getHeaders = () => {
   const authToken: string | null = localStorage.getItem("conduit_token");

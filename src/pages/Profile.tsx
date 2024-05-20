@@ -8,11 +8,12 @@ import {
 import { useMachine } from "@xstate/react";
 import clsx from 'clsx';
 import { isProd } from "../utils/env";
-import { feedMachine, feedModel } from "../machines/feed.machine";
-import { profileMachine, profileModel } from "../machines/profile.machine";
+import { feedMachine } from "../machines/feed.machine";
+import { profileMachine } from "../machines/profile.machine";
 import { ArticlePreview } from "../components/Article";
 import { Pagination } from "../components/Pagination";
 import { useIsAuthenticated } from "../hooks/is-authenticated";
+import { inspect } from '../App';
 
 export const Profile: React.FC = () => {
   const isAuthenticated = useIsAuthenticated();
@@ -24,38 +25,41 @@ export const Profile: React.FC = () => {
   const limit = parseInt(queryParams.get("limit") || "20", 10);
   const showFavorites = pathname.includes("favorites");
 
-  const [currentFeed, sendToFeed] = useMachine(feedMachine, {
-    devTools: !isProd(),
-    context: {
+  const [currentFeed, sendToFeed] = useMachine(feedMachine.provide({
+    guards: {
+      notAuthenticated: () => !isAuthenticated
+    }
+  }), {
+    inspect: isProd() ? inspect : undefined,
+    input: {
       params: {
         limit,
         offset,
         [showFavorites ? "favorited" : "author"]: username
       }
     },
-    guards: {
-      notAuthenticated: () => !isAuthenticated
-    }
   });
 
-  const [current, send] = useMachine(profileMachine, {
-    devTools: !isProd(),
-    context: {
-      profile: { username }
-    },
+  const [current, send] = useMachine(profileMachine.provide({
     guards: {
       notAuthenticated: () => !isAuthenticated
     }
+  }), {
+    inspect: isProd() ? inspect : undefined,
+    input: {
+      profile: { username }
+    },
   });
 
   React.useEffect(() => {
     if (currentFeed.matches("feedLoaded")) {
-      sendToFeed(feedModel.events.updateFeed({
+      sendToFeed({
+        type: 'updateFeed',
         limit,
         offset,
         [showFavorites ? "favorited" : "author"]: username,
         [showFavorites ? "author" : "Favorited"]: undefined
-      }));
+      });
     }
   }, [sendToFeed, offset, limit, showFavorites, username]);
 
@@ -69,15 +73,15 @@ export const Profile: React.FC = () => {
           <div className="container">
             <div className="row">
               <div className="col-xs-12 col-md-10 offset-md-1">
-                <img src={profile.image || ""} className="user-img" />
-                <h4>{profile.username}</h4>
-                <p>{profile.bio}</p>
+                <img src={profile?.image || ""} className="user-img" />
+                <h4>{profile?.username}</h4>
+                <p>{profile?.bio}</p>
                 <button
-                  className={clsx('btn btn-sm action-btn', { 'btn-secondary': profile.following, 'btn-outline-secondary': !profile.following })}
-                  onClick={() => send(profileModel.events.toggleFollowing())}
+                  className={clsx('btn btn-sm action-btn', { 'btn-secondary': profile?.following, 'btn-outline-secondary': !profile?.following })}
+                  onClick={() => send({ type: 'toggleFollowing' })}
                 >
                   <i className="ion-plus-round"></i>
-                  &nbsp; Follow{profile.following && "ing"} {profile.username}
+                  &nbsp; Follow{profile?.following && "ing"} {profile?.username}
                 </button>
               </div>
             </div>
@@ -122,13 +126,13 @@ export const Profile: React.FC = () => {
 
               {currentFeed.matches({ feedLoaded: "articlesAvailable" }) && (
                 <>
-                  {currentFeed.context.articles.map(article => (
+                  {currentFeed.context.articles?.map(article => (
                     <ArticlePreview
                       key={article.slug}
                       {...article}
                       onFavorite={slug => {
                         if (slug) {
-                          sendToFeed(feedModel.events.toggleFavorite(slug));
+                          sendToFeed({ type: 'toggleFavorite', slug });
                         }
                       }}
                     />
@@ -137,7 +141,7 @@ export const Profile: React.FC = () => {
                     limit={limit}
                     offset={offset}
                     pageCount={Math.ceil(
-                      currentFeed.context.articlesCount / limit
+                      currentFeed.context.articlesCount! / limit
                     )}
                   />
                 </>

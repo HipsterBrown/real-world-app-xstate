@@ -1,23 +1,21 @@
 import {
-  createMachine,
-  spawn,
-  actions,
+  assign,
+  assertEvent,
+  setup,
   ActorRef,
   EventObject,
-  EventFrom,
-  ContextFrom,
+  Snapshot,
+  fromPromise,
+  enqueueActions,
 } from "xstate";
-import { createModel } from 'xstate/lib/model';
 import { appRouter } from "../App";
 import { get, post, del } from "../utils/api-client";
 import type { Profile, ProfileResponse, Errors, ErrorsFrom } from "../types/api";
 
-const { choose } = actions;
-
 type ProfileContext = {
   profile?: Profile | Partial<Profile>;
   errors?: Errors;
-  followerRef?: ActorRef<EventObject>;
+  followerRef?: ActorRef<Snapshot<Omit<ProfileResponse, 'errors'>>, EventObject>;
 };
 
 const initialContext: ProfileContext = {
@@ -26,52 +24,92 @@ const initialContext: ProfileContext = {
   followerRef: undefined,
 }
 
-export const profileModel = createModel(initialContext, {
-  events: {
-    'done.invoke.profileRequest': (data: ProfileResponse) => ({ data }),
-    'done.invoke.followRequest': (data: ProfileResponse) => ({ data }),
-    'error.platform': (data: ErrorsFrom<ProfileResponse>) => ({ data }),
-    'toggleFollowing': () => ({}),
+export const profileMachine = setup({
+  types: {
+    context: {} as ProfileContext,
+    events: {} as
+      | { type: 'xstate.done.actor.profileRequest', output: ProfileResponse }
+      | { type: 'xstate.done.actor.followRequest', output: ProfileResponse }
+      | { type: 'xstate.error.actor.profileRequest', error: ErrorsFrom<ProfileResponse> }
+      | { type: 'xstate.error.actor.followRequest', error: ErrorsFrom<ProfileResponse> }
+      | { type: 'toggleFollowing' },
+    input: {} as Pick<ProfileContext, 'profile'>,
+  },
+  actions: {
+    assignData: assign({
+      profile: ({ context, event }) => {
+        if (
+          event.type === "xstate.done.actor.profileRequest" ||
+          event.type === "xstate.done.actor.followRequest"
+        )
+          return event.output.profile;
+        return context.profile;
+      }
+    }),
+    assignErrors: assign({
+      errors: ({ event }) => {
+        assertEvent(event, ['xstate.error.actor.profileRequest', 'xstate.error.actor.followRequest'])
+        return event.error.errors;
+      }
+    }),
+    followProfile: assign(({ context, spawn }) => {
+      const { profile } = context;
+      return {
+        ...context,
+        profile: {
+          ...profile,
+          following: true
+        },
+        followerRef: spawn('followProfileRequest', {
+          id: "followRequest",
+          input: { profile: context.profile }
+        })
+      };
+    }),
+    goToSignup: () => appRouter.navigate("/register"),
+    unfollowProfile: assign(({ context, spawn }) => {
+      const { profile } = context;
+      return {
+        ...context,
+        profile: {
+          ...profile,
+          following: false
+        },
+        followerRef: spawn('unfollowProfileRequest',
+          {
+            id: "followRequest",
+            input: { profile: context.profile }
+          }
+        )
+      };
+    })
+  },
+  guards: {
+    isFollowing: ({ context }) => !!context.profile?.following,
+    notAuthenticated: () => true,
+  },
+  actors: {
+    getProfile: fromPromise(async ({ input }: { input: Pick<ProfileContext, 'profile'> }) =>
+      await get<ProfileResponse>(`profiles/${input.profile?.username}`)),
+    followProfileRequest: fromPromise(async ({ input }: { input: Pick<ProfileContext, 'profile'> }) =>
+      await post<ProfileResponse, undefined>(`profiles/${input.profile?.username}/follow`, undefined)),
+    unfollowProfileRequest: fromPromise(async ({ input }: { input: Pick<ProfileContext, 'profile'> }) =>
+      await del<ProfileResponse>(`profiles/${input.profile?.username}/follow`))
   }
-})
-
-type ProfileState =
-  | {
-    value: "loading";
-    context: {
-      profile: Partial<Profile>;
-      errors: undefined;
-    };
-  }
-  | {
-    value: "profileLoaded";
-    context: {
-      profile: Profile;
-      errors: undefined;
-    };
-  }
-  | {
-    value: "errored";
-    context: {
-      profile: undefined;
-      errors: Errors;
-    };
-  };
-
-export const profileMachine = createMachine<
-  ContextFrom<typeof profileModel>,
-  EventFrom<typeof profileModel>,
-  ProfileState
->(
+}).createMachine(
   {
     id: "profile-loader",
     initial: "loading",
-    context: profileModel.initialContext,
+    context: ({ input }) => ({
+      ...initialContext,
+      ...input,
+    }),
     states: {
       loading: {
         invoke: {
           id: "profileRequest",
           src: "getProfile",
+          input: ({ context }) => ({ profile: context.profile }),
           onDone: {
             target: "profileLoaded",
             actions: "assignData"
@@ -85,81 +123,19 @@ export const profileMachine = createMachine<
       profileLoaded: {
         on: {
           toggleFollowing: {
-            actions: choose([
-              {
-                cond: "notAuthenticated",
-                actions: "goToSignup"
-              },
-              {
-                cond: "isFollowing",
-                actions: "unfollowProfile"
-              },
-              {
-                actions: "followProfile"
+            actions: enqueueActions(({ enqueue, check }) => {
+              if (check('notAuthenticated')) {
+                enqueue('goToSignup')
+              } else if (check('isFollowing')) {
+                enqueue('unfollowProfile')
+              } else {
+                enqueue('followProfile')
               }
-            ])
+            }),
           }
         }
       },
       errored: {}
     }
   },
-  {
-    actions: {
-      assignData: profileModel.assign({
-        profile: (context, event) => {
-          if (
-            event.type === "done.invoke.profileRequest" ||
-            event.type === "done.invoke.followRequest"
-          )
-            return event.data.profile;
-          return context.profile;
-        }
-      }),
-      assignErrors: profileModel.assign({
-        errors: (_, event) => {
-          return event.data.errors;
-        }
-      }, 'error.platform'),
-      followProfile: profileModel.assign(context => {
-        const { profile } = context;
-        return {
-          ...context,
-          profile: {
-            ...profile,
-            following: true
-          },
-          followerRef: spawn(
-            post<ProfileResponse, undefined>(
-              `profiles/${profile?.username}/follow`,
-              undefined
-            ),
-            "followRequest"
-          )
-        };
-      }, 'toggleFollowing'),
-      goToSignup: () => appRouter.navigate("/register"),
-      unfollowProfile: profileModel.assign(context => {
-        const { profile } = context;
-        return {
-          ...context,
-          profile: {
-            ...profile,
-            following: false
-          },
-          followerRef: spawn(
-            del<ProfileResponse>(`profiles/${profile?.username}/follow`),
-            "followRequest"
-          )
-        };
-      }, 'toggleFollowing')
-    },
-    guards: {
-      isFollowing: ({ profile }) => !!profile?.following
-    },
-    services: {
-      getProfile: ({ profile }) =>
-        get<ProfileResponse>(`profiles/${profile?.username}`)
-    }
-  }
 );

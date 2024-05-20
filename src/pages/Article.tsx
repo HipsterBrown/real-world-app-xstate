@@ -3,24 +3,25 @@ import { Link, useParams } from "react-router-dom";
 import { useMachine } from "@xstate/react";
 import { marked } from "marked";
 import { sanitize } from "dompurify";
-import { articleMachine, articleModel } from "../machines/article.machine";
+import { articleMachine } from "../machines/article.machine";
 import { isProd } from "../utils/env";
 import { AuthorCard } from "../components/AuthorCard";
 import { CommentCard } from "../components/Comment";
 import { Tag } from "../components/Tag";
 import { useIsAuthenticated } from "../hooks/is-authenticated";
-import { AppMachineContext } from "../App";
+import { AppMachineContext, inspect } from "../App";
 
 export const Article: React.FC = () => {
   const isAuthenticated = useIsAuthenticated();
   const currentUser = AppMachineContext.useSelector(state => state.context.user);
   const { slug } = useParams<{ slug: string }>();
-  const [current, send] = useMachine(articleMachine, {
-    devTools: !isProd(),
+  const [current, send] = useMachine(articleMachine.provide({
     guards: {
       notAuthenticated: () => !isAuthenticated
     },
-    context: {
+  }), {
+    inspect: isProd() ? inspect : undefined,
+    input: {
       slug
     }
   });
@@ -30,9 +31,10 @@ export const Article: React.FC = () => {
     const bodyEl: HTMLTextAreaElement = event.currentTarget.elements.namedItem(
       "body"
     ) as HTMLTextAreaElement;
-    send(articleModel.events.createComment(
-      { body: bodyEl.value }
-    ));
+    send({
+      type: 'createComment',
+      comment: { body: bodyEl.value }
+    });
     bodyEl.value = "";
   };
 
@@ -42,21 +44,21 @@ export const Article: React.FC = () => {
         <>
           <div className="banner">
             <div className="container">
-              <h1>{current.context.article.title}</h1>
+              <h1>{current.context.article?.title}</h1>
 
               <AuthorCard
                 variant={
-                  current.context.article.author.username ===
+                  current.context.article?.author.username ===
                     currentUser?.username
                     ? "currentAuthor"
                     : "post"
                 }
-                {...current.context.article.author}
-                {...current.context.article}
-                onDelete={() => send(articleModel.events.deleteArticle())}
-                onFavorite={() => send(articleModel.events.toggleFavorite())}
+                {...current.context.article!.author}
+                {...current.context.article!}
+                onDelete={() => send({ type: 'deleteArticle' })}
+                onFavorite={() => send({ type: 'toggleFavorite' })}
                 onFollow={() =>
-                  send(articleModel.events.toggleFollow(current.context.article.author.username))
+                  send({ type: 'toggleFollow', username: current.context.article?.author.username ?? '' })
                 }
               />
             </div>
@@ -65,14 +67,14 @@ export const Article: React.FC = () => {
           <div className="container page">
             <div className="row article-content">
               <div className="col-md-12">
-                <p>{current.context.article.description}</p>
+                <p>{current.context.article?.description}</p>
                 <div
                   dangerouslySetInnerHTML={{
-                    __html: sanitize(marked(current.context.article.body))
+                    __html: sanitize(marked(current.context.article?.body ?? '') as string)
                   }}
                 />
                 <ul className="tag-list">
-                  {current.context.article.tagList.map(tag => (
+                  {current.context.article?.tagList.map(tag => (
                     <Tag key={tag}>{tag}</Tag>
                   ))}
                 </ul>
@@ -84,17 +86,17 @@ export const Article: React.FC = () => {
             <div className="article-actions">
               <AuthorCard
                 variant={
-                  current.context.article.author.username ===
+                  current.context.article?.author.username ===
                     currentUser?.username
                     ? "currentAuthor"
                     : "post"
                 }
-                {...current.context.article.author}
-                {...current.context.article}
-                onDelete={() => send(articleModel.events.deleteArticle())}
-                onFavorite={() => send(articleModel.events.toggleFavorite())}
+                {...current.context.article!.author}
+                {...current.context.article!}
+                onDelete={() => send({ type: 'deleteArticle' })}
+                onFavorite={() => send({ type: 'toggleFavorite' })}
                 onFollow={() =>
-                  send(articleModel.events.toggleFollow(current.context.article.author.username))
+                  send({ type: 'toggleFollow', username: current.context.article?.author.username ?? '' })
                 }
               />
             </div>
@@ -133,13 +135,13 @@ export const Article: React.FC = () => {
             </p>
           )}
           {current.matches({ comments: "hasContent" }) &&
-            current.context.comments.map(comment => (
+            current.context.comments?.map(comment => (
               <CommentCard
                 key={comment.id}
                 {...comment}
                 onDelete={
                   comment.author.username === currentUser?.username
-                    ? id => send(articleModel.events.deleteComment(id))
+                    ? id => send({ type: 'deleteComment', id: id })
                     : undefined
                 }
               />

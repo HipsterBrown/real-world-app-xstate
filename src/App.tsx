@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Route, Navigate, createBrowserRouter, RouterProvider, createRoutesFromElements } from "react-router-dom";
 import { createActorContext } from "@xstate/react";
-import { inspect } from "@xstate/inspect";
+import { createBrowserInspector } from "@statelyai/inspect";
 import { isProd } from "./utils/env";
 import { appMachine } from "./machines/app.machine";
 import { Home } from "./pages/Home";
@@ -13,12 +13,9 @@ import { Article } from "./pages/Article";
 import { AppLayout } from "./components/AppLayout";
 import { useIsAuthenticated } from "./hooks/is-authenticated";
 
-if (!isProd()) {
-  inspect({
-    iframe: false
-  });
-}
-export const AppMachineContext = createActorContext(appMachine, { devTools: !isProd() });
+export const { inspect } = createBrowserInspector();
+
+export const AppMachineContext = createActorContext(appMachine, { inspect: isProd() ? inspect : undefined });
 const basename = isProd() ? String(process.env.PUBLIC_URL) : '/';
 
 const AuthenticatedRoute: React.FC<

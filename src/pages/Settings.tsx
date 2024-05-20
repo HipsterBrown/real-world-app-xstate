@@ -1,24 +1,25 @@
 import * as React from "react";
 import { Formik, Form, Field } from "formik";
 import { useMachine } from "@xstate/react";
-import { settingsMachine, settingsModel } from "../machines/settings.machine";
+import { settingsMachine } from "../machines/settings.machine";
 import { isProd } from "../utils/env";
 import type { User } from "../types/api";
-import { AppMachineContext } from "../App";
-import { appModel } from "../machines/app.machine";
+import { AppMachineContext, inspect } from "../App";
 
 export const Settings: React.FC = () => {
-  const [appState, sendToApp] = AppMachineContext.useActor();
+  const appMachine = AppMachineContext.useActorRef();
+  const appState = AppMachineContext.useSelector(s => s);
   const currentUser = appState.context.user!;
-  const onLogout = () => sendToApp(appModel.events.logOut())
-  const onUpdate = (user: User) => sendToApp(appModel.events.updateUser(user))
-  const [current, send] = useMachine(settingsMachine, {
-    devTools: !isProd(),
+  const onLogout = () => appMachine.send({ type: 'logOut' })
+  const onUpdate = (user: User) => appMachine.send({ type: 'updateUser', user: user })
+  const [current, send] = useMachine(settingsMachine.provide({
     actions: {
-      updateParent: ({ user }) => {
-        if (user) onUpdate(user);
+      updateParent: ({ context }) => {
+        if (context.user) onUpdate(context.user);
       }
     }
+  }), {
+    inspect: isProd() ? inspect : undefined,
   });
 
   return (
@@ -30,7 +31,7 @@ export const Settings: React.FC = () => {
             <Formik<User>
               initialValues={currentUser}
               onSubmit={values => {
-                send(settingsModel.events.submit(values));
+                send({ type: 'submit', values });
               }}
               enableReinitialize={true}
             >

@@ -1,13 +1,13 @@
 import {
-  createMachine,
-  actions,
-  spawn,
+  setup,
+  assign,
+  assertEvent,
+  enqueueActions,
   ActorRef,
   EventObject,
-  EventFrom,
-  ContextFrom,
+  Snapshot,
+  fromPromise,
 } from "xstate";
-import { createModel } from 'xstate/lib/model';
 import { get, del, post } from "../utils/api-client";
 import { appRouter } from "../App";
 import type {
@@ -17,8 +17,6 @@ import type {
   Errors,
   ErrorsFrom
 } from "../types/api";
-
-const { choose } = actions;
 
 type FeedContext = {
   articles?: Article[];
@@ -32,7 +30,7 @@ type FeedContext = {
     tag?: string;
     favorited?: string;
   };
-  favoriteRef?: ActorRef<EventObject>;
+  favoriteRef?: ActorRef<Snapshot<Omit<ArticleResponse, 'errors'>>, EventObject>;
 };
 
 const initialContext: FeedContext = {
@@ -45,70 +43,140 @@ const initialContext: FeedContext = {
   }
 }
 
-export const feedModel = createModel(initialContext, {
-  events: {
-    'done.invoke.getFeed': (data: ArticleListResponse) => ({ data }),
-    'done.invoke.favoriting': (data: ArticleResponse) => ({ data }),
-    'error.platform': (data: ErrorsFrom<ArticleResponse | ArticleListResponse>) => ({ data }),
-    'retry': () => ({}),
-    'refresh': () => ({}),
-    'updateFeed': (params: FeedContext['params']) => params,
-    'toggleFavorite': (slug: string) => ({ slug }),
-  }
-})
+export const feedMachine = setup({
+  types: {
+    context: {} as FeedContext,
+    events: {} as
+      | { type: 'xstate.done.actor.getFeed', output: ArticleListResponse }
+      | { type: 'xstate.done.actor.favoriting', data: ArticleResponse }
+      | { type: 'xstate.error.actor.getFeed', error: ErrorsFrom<ArticleListResponse> }
+      | { type: 'xstate.error.actor.favoriting', error: ErrorsFrom<ArticleResponse> }
+      | { type: 'retry' }
+      | { type: 'refresh' }
+      | { type: 'updateFeed' } & FeedContext['params']
+      | { type: 'toggleFavorite', slug: string },
+    input: {} as Pick<FeedContext, 'params'>,
+  },
+  actions: {
+    assignArticleData: assign({
+      articles: ({ context, event }) => {
+        assertEvent(event, 'xstate.done.actor.favoriting')
+        const data = event.data.article;
+        return context.articles?.map(article =>
+          article.slug === data.slug ? data : article
+        );
+      }
+    }),
+    assignData: assign(({ context, event }) => {
+      assertEvent(event, 'xstate.done.actor.getFeed')
+      return {
+        ...context,
+        ...event.output
+      };
+    }),
+    assignErrors: assign({
+      errors: ({ event }) => {
+        assertEvent(event, ['xstate.error.actor.getFeed', 'xstate.error.actor.favoriting'])
+        return event.error.errors;
+      }
+    }),
+    clearErrors: assign({ errors: undefined }),
+    goToSignup: () => appRouter.navigate("/register"),
+    deleteFavorite: assign(({ context, event, spawn }) => {
+      assertEvent(event, 'toggleFavorite');
+      const articles = context.articles?.map(article => {
+        if (article.slug === event.slug) {
+          return {
+            ...article,
+            favorited: false,
+            favoritesCount: article.favoritesCount - 1
+          };
+        }
+        return article;
+      });
+      return {
+        ...context,
+        articles,
+        favoriteRef: spawn('unfavoriteRequest', { id: "favoriting", input: { slug: event.slug } })
+      };
+    }),
+    favoriteArticle: assign(({ context, event, spawn }) => {
+      assertEvent(event, 'toggleFavorite')
+      const articles = context.articles?.map(article => {
+        if (article.slug === event.slug) {
+          return {
+            ...article,
+            favorited: true,
+            favoritesCount: article.favoritesCount + 1
+          };
+        }
+        return article;
+      });
+      return {
+        ...context,
+        articles,
+        favoriteRef: spawn('favoriteRequest',
+          { id: "favoriting", input: { slug: event.slug } }
+        )
+      };
+    }),
+    updateParams: assign(({ context, event }) => {
+      assertEvent(event, 'updateFeed')
+      return {
+        ...context,
+        params: event
+      };
+    })
+  },
+  guards: {
+    dataIsEmpty: ({ context }) => context.articles?.length === 0,
+    articleIsFavorited: ({ context, event }) =>
+      event.type === "toggleFavorite" &&
+      !!context.articles?.find(
+        article => article.slug === event.slug && article.favorited
+      ),
+    notAuthenticated: () => false,
 
-type FeedState =
-  | {
-    value: "loading";
-    context: FeedContext & {
-      articles: undefined;
-      articlesCount: undefined;
-      errors: undefined;
-    };
-  }
-  | {
-    value: "feedLoaded";
-    context: FeedContext & {
-      articles: Article[] | [];
-      articlesCount: number;
-      errors: undefined;
-    };
-  }
-  | {
-    value: { feedLoaded: "articlesAvailable" };
-    context: FeedContext & {
-      articles: Article[];
-      articlesCount: number;
-      errors: undefined;
-    };
-  }
-  | {
-    value: { feedLoaded: "noArticles" };
-    context: FeedContext & {
-      articles: [];
-      articlesCount: 0;
-      errors: undefined;
-    };
-  }
-  | {
-    value: "failedLoadingFeed";
-    context: FeedContext & {
-      articles: undefined;
-      articlesCount: undefined;
-      errors: Errors;
-    };
-  };
+  },
+  actors: {
+    favoriteRequest: fromPromise(async ({ input }: { input: { slug: string } }) =>
+      await post<ArticleResponse>(
+        `articles/${input.slug}/favorite`,
+        undefined
+      )),
+    feedRequest: fromPromise(({ input }: { input: Pick<FeedContext, 'params'> }) => {
+      const params = new URLSearchParams({
+        limit: input.params.limit.toString(),
+        offset: input.params.offset.toString()
+      });
+      if (input.params.author) params.set("author", input.params.author);
+      if (input.params.tag) params.set("tag", input.params.tag);
+      if (input.params.favorited)
+        params.set("favorited", input.params.favorited);
 
-export const feedMachine = createMachine<ContextFrom<typeof feedModel>, EventFrom<typeof feedModel>, FeedState>(
+      return get<ArticleListResponse>(
+        (input.params.feed === "me" ? "articles/feed?" : "articles?") +
+        params.toString()
+      );
+    }),
+    unfavoriteRequest: fromPromise(async ({ input }: { input: { slug: string } }) =>
+      await del<ArticleResponse>(`articles/${input.slug}/favorite`),
+    ),
+  }
+}).createMachine(
   {
     id: "feed-loader",
     initial: "loading",
-    context: feedModel.initialContext,
+    context: ({ input }) => ({
+      ...initialContext,
+      ...input
+    }),
     states: {
       loading: {
         invoke: {
           id: "getFeed",
           src: "feedRequest",
+          input: ({ context }) => ({ params: context.params }),
           onDone: {
             target: "feedLoaded",
             actions: "assignData"
@@ -126,7 +194,7 @@ export const feedMachine = createMachine<ContextFrom<typeof feedModel>, EventFro
             always: [
               {
                 target: "noArticles",
-                cond: "dataIsEmpty"
+                guard: "dataIsEmpty"
               },
               {
                 target: "articlesAvailable"
@@ -143,19 +211,15 @@ export const feedMachine = createMachine<ContextFrom<typeof feedModel>, EventFro
             actions: "updateParams"
           },
           toggleFavorite: {
-            actions: choose([
-              {
-                cond: "notAuthenticated",
-                actions: "goToSignup"
-              },
-              {
-                cond: "articleIsFavorited",
-                actions: "deleteFavorite"
-              },
-              {
-                actions: "favoriteArticle"
+            actions: enqueueActions(({ enqueue, check }) => {
+              if (check('notAuthenticated')) {
+                enqueue('goToSignup');
+              } else if (check('articleIsFavorited')) {
+                enqueue('deleteFavorite')
+              } else {
+                enqueue('favoriteArticle')
               }
-            ])
+            }),
           },
           "done.invoke.favoriting": {
             actions: "assignArticleData"
@@ -169,103 +233,4 @@ export const feedMachine = createMachine<ContextFrom<typeof feedModel>, EventFro
       }
     }
   },
-  {
-    actions: {
-      assignArticleData: feedModel.assign({
-        articles: (context, event) => {
-          const data = event.data.article;
-          return context.articles?.map(article =>
-            article.slug === data.slug ? data : article
-          );
-        }
-      }, 'done.invoke.favoriting'),
-      assignData: feedModel.assign((context, event) => {
-        return {
-          ...context,
-          ...event.data
-        };
-      }, 'done.invoke.getFeed'),
-      assignErrors: feedModel.assign({
-        errors: (_, event) => {
-          return event.data.errors;
-        }
-      }, 'error.platform'),
-      clearErrors: feedModel.assign({ errors: undefined }),
-      goToSignup: () => appRouter.navigate("/register"),
-      deleteFavorite: feedModel.assign((context, event) => {
-        const articles = context.articles?.map(article => {
-          if (article.slug === event.slug) {
-            return {
-              ...article,
-              favorited: false,
-              favoritesCount: article.favoritesCount - 1
-            };
-          }
-          return article;
-        });
-        return {
-          ...context,
-          articles,
-          favoriteRef: spawn(
-            del<ArticleResponse>(`articles/${event.slug}/favorite`),
-            "favoriting"
-          )
-        };
-      }, 'toggleFavorite'),
-      favoriteArticle: feedModel.assign((context, event) => {
-        const articles = context.articles?.map(article => {
-          if (article.slug === event.slug) {
-            return {
-              ...article,
-              favorited: true,
-              favoritesCount: article.favoritesCount + 1
-            };
-          }
-          return article;
-        });
-        return {
-          ...context,
-          articles,
-          favoriteRef: spawn(
-            post<ArticleResponse>(
-              `articles/${event.slug}/favorite`,
-              undefined
-            ),
-            "favoriting"
-          )
-        };
-      }, 'toggleFavorite'),
-      updateParams: feedModel.assign((context, event) => {
-        return {
-          ...context,
-          params: event
-        };
-      }, 'updateFeed')
-    },
-    guards: {
-      dataIsEmpty: context => context.articles?.length === 0,
-      articleIsFavorited: (context, event) =>
-        event.type === "toggleFavorite" &&
-        !!context.articles?.find(
-          article => article.slug === event.slug && article.favorited
-        )
-    },
-    services: {
-      feedRequest: context => {
-        const params = new URLSearchParams({
-          limit: context.params.limit.toString(),
-          offset: context.params.offset.toString()
-        });
-        if (context.params.author) params.set("author", context.params.author);
-        if (context.params.tag) params.set("tag", context.params.tag);
-        if (context.params.favorited)
-          params.set("favorited", context.params.favorited);
-
-        return get<ArticleListResponse>(
-          (context.params.feed === "me" ? "articles/feed?" : "articles?") +
-          params.toString()
-        );
-      }
-    }
-  }
 );

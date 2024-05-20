@@ -2,8 +2,7 @@ import * as React from "react";
 import { Formik, Field, Form } from "formik";
 import { object, string } from "yup";
 import { Link } from "react-router-dom";
-import { useActor } from "@xstate/react";
-import { authModel } from "../machines/auth.machine";
+import { useSelector } from "@xstate/react";
 import { ErrorListItem } from "../components/ErrorListItem";
 import { mapErrors } from "../utils/errors";
 import { AppMachineContext } from "../App";
@@ -31,7 +30,7 @@ export const Auth: React.FC<{
   mode?: "signup" | "login";
 }> = ({ mode = "signup" }) => {
   const authService = AppMachineContext.useSelector(state => state.context.auth);
-  const [current, send] = useActor(authService);
+  const current = useSelector(authService!, s => s);
 
   return (
     <div className="auth-page">
@@ -55,7 +54,7 @@ export const Auth: React.FC<{
             <Formik<SignUpValues | LogInValues>
               initialValues={{ name: "", email: "", password: "" }}
               onSubmit={values => {
-                send(authModel.events.submit(values));
+                authService?.send({ type: 'submit', ...values });
               }}
               validationSchema={mode === "signup" ? SignUpSchema : LogInSchema}
             >
@@ -65,7 +64,7 @@ export const Auth: React.FC<{
                   <ErrorListItem name="password" />
                   <ErrorListItem name="name" />
                   {current.matches("failed") &&
-                    mapErrors(current.context.errors).map(message => (
+                    mapErrors(current.context.errors!).map(message => (
                       <li key={message}>{message}</li>
                     ))}
                 </ul>
