@@ -1,11 +1,12 @@
 import {
-  createMachine,
-  actions,
-  spawn,
+  setup,
+  assign,
+  assertEvent,
+  enqueueActions,
+  fromPromise,
   ActorRef,
   EventObject,
-  EventFrom,
-  ContextFrom,
+  Snapshot,
 } from "xstate";
 import { get, post, del } from "../utils/api-client";
 import { appRouter } from '../App';
@@ -18,81 +19,182 @@ import type {
   ErrorsFrom,
   ProfileResponse
 } from "../types/api";
-import { createModel } from "xstate/lib/model";
-
-const { choose } = actions;
 
 type ArticleContext = {
   slug: string;
   article?: Article;
   comments?: Comment[];
-  deletingRef?: ActorRef<EventObject>;
-  creatingCommentRef?: ActorRef<EventObject>;
-  deletingCommentRef?: ActorRef<EventObject>;
-  favoritingRef?: ActorRef<EventObject>;
-  followingRef?: ActorRef<EventObject>;
+  deletingRef?: ActorRef<Snapshot<ArticleResponse>, EventObject>;
+  creatingCommentRef?: ActorRef<Snapshot<CommentResponse>, EventObject>;
+  deletingCommentRef?: ActorRef<Snapshot<CommentResponse>, EventObject>;
+  favoritingRef?: ActorRef<Snapshot<ArticleResponse>, EventObject>;
+  followingRef?: ActorRef<Snapshot<ProfileResponse>, EventObject>;
 };
 
 const initialContext: ArticleContext = {
   slug: '',
 }
 
-export const articleModel = createModel(initialContext, {
-  events: {
-    'error.platform': (data: ErrorsFrom<ArticleResponse | CommentListResponse | CommentResponse | ProfileResponse>) => ({ data }),
-    'done.invoke.getArticle': (data: ArticleResponse) => ({ data }),
-    'done.invoke.deletingArticle': () => ({}),
-    'done.invoke.getComments': (data: CommentListResponse) => ({ data }),
-    'done.invoke.creatingComment': (data: CommentResponse) => ({ data }),
-    'done.invoke.favoriting': (data: ArticleResponse) => ({ data }),
-    'done.invoke.following': (data: ProfileResponse) => ({ data }),
-    'createComment': (comment: { body: string }) => ({ comment }),
-    'toggleFollow': (username: string) => ({ username }),
-    'toggleFavorite': () => ({}),
-    'deleteArticle': () => ({}),
-    'deleteComment': (id: Comment['id']) => ({ id }),
-  }
-})
-
-type ArticleState =
-  | {
-    value:
-    | "article"
-    | { article: "fetching" }
-    | "comments"
-    | { comments: "fetching" };
-    context: ArticleContext & {
-      article: undefined;
-      comments: undefined;
-    };
-  }
-  | {
-    value: { article: "hasContent" };
-    context: ArticleContext & {
-      article: Article;
-    };
-  }
-  | {
-    value: { comments: "hasContent" };
-    context: ArticleContext & {
-      comments: Comment[];
-    };
-  }
-  | {
-    value: { comments: "noContent" };
-    context: ArticleContext & {
-      comments: [];
-    };
-  };
-
 export const articleMachine =
-  createMachine<
-    ContextFrom<typeof articleModel>,
-    EventFrom<typeof articleModel>,
-    ArticleState
-  >(
+  setup({
+    types: {
+      context: {} as ArticleContext,
+      events: {} as
+        | { type: "xstate.error.actor", error: ErrorsFrom<ArticleResponse | CommentListResponse | CommentResponse | ProfileResponse> }
+        | { type: "xstate.done.actor.getArticle", output: ArticleResponse }
+        | { type: "xstate.done.actor.deletingArticle" }
+        | { type: "xstate.done.actor.getComments", output: CommentListResponse }
+        | { type: "xstate.done.actor.creatingComment", output: CommentResponse }
+        | { type: "xstate.done.actor.favoriting", output: ArticleResponse }
+        | { type: "xstate.done.actor.following", output: ProfileResponse }
+        | { type: "createComment", comment: { body: string } }
+        | { type: "toggleFollow", username: string }
+        | { type: "toggleFavorite" }
+        | { type: "deleteArticle" }
+        | { type: "deleteComment", id: Comment["id"] },
+      input: {} as {
+        slug?: string,
+      }
+    },
+    actions: {
+      assignArticleData: assign({
+        article: ({ event }) => {
+          assertEvent(event, "xstate.done.actor.getArticle")
+          return event.output.article;
+        }
+      }),
+      assignCommentData: assign({
+        comments: ({ event }) => {
+          assertEvent(event, "xstate.done.actor.getComments")
+          return event.output.comments;
+        }
+      }),
+      goToSignup: () => appRouter.navigate("/register"),
+      goHome: () => appRouter.navigate("/"),
+      deleteArticle: assign({
+        deletingRef: ({ context, spawn }) =>
+          spawn(fromPromise(() => del(`articles/${context.slug}`)), { id: "deletingArticle" })
+      }),
+      createComment: assign({
+        creatingCommentRef: ({ context, event, spawn }) => {
+          assertEvent(event, "createComment");
+          return spawn(
+            fromPromise(() => post<CommentResponse, { comment: Pick<Comment, "body"> }>(
+              `articles/${context.slug}/comments`,
+              { comment: event.comment }
+            )),
+            { id: "creatingComment" }
+          );
+        }
+      }),
+      deleteComment: assign(({ context, event, spawn }) => {
+        assertEvent(event, "deleteComment")
+        return {
+          ...context,
+          deletingCommentRef: spawn(
+            fromPromise(() => del(`articles/${context.slug}/comments/${event.id}`))
+          ),
+          comments:
+            context.comments?.filter(comment => comment.id === event.id) || []
+        };
+      }),
+      deleteFavorite: assign(({ context, spawn }) => {
+        const article: Article = {
+          ...context.article!,
+          favorited: false,
+          favoritesCount: context.article!.favoritesCount - 1
+        };
+        return {
+          ...context,
+          article,
+          favoriteRef: spawn(
+            fromPromise(() => del<ArticleResponse>(`articles/${context.slug}/favorite`)),
+            { id: "favoriting" }
+          )
+        };
+      }),
+      favoriteArticle: assign(({ context, spawn }) => {
+        const article: Article = {
+          ...context.article!,
+          favorited: true,
+          favoritesCount: context.article!.favoritesCount + 1
+        };
+        return {
+          ...context,
+          article,
+          favoriteRef: spawn(
+            fromPromise(() => post<ArticleResponse>(
+              `articles/${context.slug}/favorite`,
+              undefined
+            )),
+            { id: "favoriting" }
+          )
+        };
+      }),
+      followAuthor: assign(({ context, event, spawn }) => {
+        assertEvent(event, "toggleFollow")
+        return {
+          ...context,
+          followingRef: spawn(
+            fromPromise(() => post<ProfileResponse>(
+              `profiles/${event.username}/follow`,
+              undefined
+            ))
+          ),
+          article: {
+            ...context.article!,
+            author: {
+              ...context.article!.author,
+              following: true
+            }
+          }
+        };
+      }),
+      unfollowAuthor: assign(({ context, event, spawn }) => {
+        assertEvent(event, "toggleFollow")
+        return {
+          ...context,
+          followingRef: spawn(fromPromise(() =>
+            del<ProfileResponse>(`profiles/${event.username}/follow`)
+          )),
+          article: {
+            ...context.article!,
+            author: {
+              ...context.article!.author,
+              following: false
+            }
+          }
+        };
+      }),
+      assignNewComment: assign({
+        comments: ({ context, event }) => {
+          assertEvent(event, "xstate.done.actor.creatingComment")
+          return [event.output.comment].concat(context.comments!);
+        }
+      })
+    },
+    guards: {
+      hasCommentContent: ({ event }) => {
+        assertEvent(event, "xstate.done.actor.getComments")
+        return !!event.output.comments.length;
+      },
+      isOnlyComment: ({ context }) => context.comments?.length === 1,
+      notFollowing: ({ context }) => !context.article?.author?.following,
+      articleIsFavorited: ({ context }) => !!context.article?.favorited,
+      notAuthenticated: () => true,
+    },
+    actors: {
+      getArticle: fromPromise(({ input }: { input: Pick<ArticleContext, 'slug'> }) => get<ArticleResponse>(`articles/${input.slug}`)),
+      getComments: fromPromise(({ input }: { input: Pick<ArticleContext, 'slug'> }) =>
+        get<CommentListResponse>(`articles/${input.slug}/comments`))
+    }
+  }).createMachine(
     {
       id: "article",
+      context: ({ input }) => ({
+        ...initialContext,
+        slug: input.slug ?? '',
+      }),
       type: "parallel",
       states: {
         article: {
@@ -101,6 +203,7 @@ export const articleMachine =
             fetching: {
               invoke: {
                 src: "getArticle",
+                input: ({ context }) => ({ slug: context.slug }),
                 id: "getArticle",
                 onDone: [
                   {
@@ -113,35 +216,30 @@ export const articleMachine =
             hasContent: {
               on: {
                 toggleFollow: {
-                  actions: choose([
-                    {
-                      actions: "goToSignup",
-                      cond: "notAuthenticated",
-                    },
-                    {
-                      actions: "followAuthor",
-                      cond: "notFollowing",
-                    },
-                    {
-                      actions: "unfollowAuthor",
-                    },
-                  ]),
+                  actions: enqueueActions(({ enqueue, check }) => {
+                    if (check("notAuthenticated")) {
+                      console.log("should go to signup")
+                      enqueue("goToSignup")
+                    } else if (check("notFollowing")) {
+                      console.log("follow author")
+                      enqueue("followAuthor")
+                    } else {
+                      console.log("unfollow author")
+                      enqueue("unfollowAuthor")
+                    }
+                  }),
                   target: "#article.article.hasContent",
                 },
                 toggleFavorite: {
-                  actions: choose([
-                    {
-                      actions: "goToSignup",
-                      cond: "notAuthenticated",
-                    },
-                    {
-                      actions: "deleteFavorite",
-                      cond: "articleIsFavorited",
-                    },
-                    {
-                      actions: "favoriteArticle",
-                    },
-                  ]),
+                  actions: enqueueActions(({ enqueue, check }) => {
+                    if (check("notAuthenticated")) {
+                      enqueue("goToSignup")
+                    } else if (check("articleIsFavorited")) {
+                      enqueue("deleteFavorite")
+                    } else {
+                      enqueue("favoriteArticle")
+                    }
+                  }),
                   target: "#article.article.hasContent",
                 },
                 deleteArticle: {
@@ -159,10 +257,11 @@ export const articleMachine =
               invoke: {
                 src: "getComments",
                 id: "getComments",
+                input: ({ context }) => ({ slug: context.slug }),
                 onDone: [
                   {
                     actions: "assignCommentData",
-                    cond: "hasCommentContent",
+                    guard: "hasCommentContent",
                     target: "#article.comments.hasContent",
                   },
                   {
@@ -181,7 +280,7 @@ export const articleMachine =
                 deleteComment: [
                   {
                     actions: "deleteComment",
-                    cond: "isOnlyComment",
+                    guard: "isOnlyComment",
                     target: "#article.comments.noContent",
                   },
                   {
@@ -202,134 +301,5 @@ export const articleMachine =
           },
         },
       },
-    },
-    {
-      actions: {
-        assignArticleData: articleModel.assign({
-          article: (_, event) => {
-            return event.data.article;
-          }
-        }, 'done.invoke.getArticle'),
-        assignCommentData: articleModel.assign({
-          comments: (_, event) => {
-            return event.data.comments;
-          }
-        }, 'done.invoke.getComments'),
-        goToSignup: () => appRouter.navigate("/register"),
-        goHome: () => appRouter.navigate("/"),
-        deleteArticle: articleModel.assign({
-          deletingRef: context =>
-            spawn(del(`articles/${context.slug}`), "deletingArticle")
-        }),
-        createComment: articleModel.assign({
-          creatingCommentRef: (context, event) => {
-            return spawn(
-              post<CommentResponse, { comment: Pick<Comment, "body"> }>(
-                `articles/${context.slug}/comments`,
-                { comment: event.comment }
-              ),
-              "creatingComment"
-            );
-          }
-        }, 'createComment'),
-        deleteComment: articleModel.assign((context, event) => {
-          return {
-            ...context,
-            deletingCommentRef: spawn(
-              del(`articles/${context.slug}/comments/${event.id}`)
-            ),
-            comments:
-              context.comments?.filter(comment => comment.id === event.id) || []
-          };
-        }, 'deleteComment'),
-        deleteFavorite: articleModel.assign((context) => {
-          const article: Article = {
-            ...context.article!,
-            favorited: false,
-            favoritesCount: context.article!.favoritesCount - 1
-          };
-
-          return {
-            ...context,
-            article,
-            favoriteRef: spawn(
-              del<ArticleResponse>(`articles/${context.slug}/favorite`),
-              "favoriting"
-            )
-          };
-        }, 'toggleFavorite'),
-        favoriteArticle: articleModel.assign((context) => {
-          const article: Article = {
-            ...context.article!,
-            favorited: true,
-            favoritesCount: context.article!.favoritesCount + 1
-          };
-          return {
-            ...context,
-            article,
-            favoriteRef: spawn(
-              post<ArticleResponse>(
-                `articles/${context.slug}/favorite`,
-                undefined
-              ),
-              "favoriting"
-            )
-          };
-        }, 'toggleFavorite'),
-        followAuthor: articleModel.assign((context, event) => {
-          return {
-            ...context,
-            followingRef: spawn(
-              post<ProfileResponse>(
-                `profiles/${event.username}/follow`,
-                undefined
-              )
-            ),
-            article: {
-              ...context.article!,
-              author: {
-                ...context.article!.author,
-                following: true
-              }
-            }
-          };
-        }, 'toggleFollow'),
-        unfollowAuthor: articleModel.assign((context, event) => {
-          return {
-            ...context,
-            followingRef: spawn(
-              del<ProfileResponse>(`profiles/${event.username}/follow`)
-            ),
-            article: {
-              ...context.article!,
-              author: {
-                ...context.article!.author,
-                following: false
-              }
-            }
-          };
-        }, 'toggleFollow'),
-        assignNewComment: articleModel.assign({
-          comments: (context, event) => {
-            return [event.data.comment].concat(context.comments!);
-          }
-        }, 'done.invoke.creatingComment')
-      },
-      guards: {
-        hasCommentContent: (_context, event) => {
-          if (event.type === "done.invoke.getComments") {
-            return !!event.data.comments.length;
-          }
-          return false;
-        },
-        isOnlyComment: context => context.comments?.length === 1,
-        notFollowing: context => !context.article?.author?.following,
-        articleIsFavorited: context => !!context.article?.favorited
-      },
-      services: {
-        getArticle: context => get<ArticleResponse>(`articles/${context.slug}`),
-        getComments: context =>
-          get<CommentListResponse>(`articles/${context.slug}/comments`)
-      }
     }
   );

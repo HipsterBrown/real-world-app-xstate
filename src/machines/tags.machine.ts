@@ -1,5 +1,4 @@
-import { createMachine, EventFrom, ContextFrom } from "xstate";
-import { createModel } from 'xstate/lib/model';
+import { assign, assertEvent, setup, fromPromise } from "xstate";
 import { get } from "../utils/api-client";
 import type { TagListResponse, Errors, ErrorsFrom } from "../types/api";
 
@@ -13,41 +12,36 @@ const initialContext: TagsContext = {
   errors: undefined,
 }
 
-export const tagsModel = createModel(initialContext, {
-  events: {
-    'done.invoke.tagsRequest': (data: TagListResponse) => ({ data }),
-    'error.platform': (data: ErrorsFrom<TagListResponse>) => ({ data }),
+export const tagsMachine = setup({
+  types: {
+    context: {} as TagsContext,
+    events: {} as
+      | { type: 'xstate.done.actor.tagsRequest', output: TagListResponse }
+      | { type: 'xstate.error.actor', error: ErrorsFrom<TagListResponse> }
+  },
+  actions: {
+    assignData: assign({
+      tags: ({ event }) => {
+        assertEvent(event, 'xstate.done.actor.tagsRequest');
+        return event.output.tags;
+      }
+    }),
+    assignErrors: assign({
+      errors: ({ event }) => {
+        assertEvent(event, 'xstate.error.actor')
+        return event.error.errors;
+      }
+    })
+  },
+  guards: {},
+  actors: {
+    requestTags: fromPromise(() => get<TagListResponse>("tags"))
   }
-})
-
-export type TagsState =
-  | {
-    value: "loading";
-    context: {
-      tags: undefined;
-      errors: undefined;
-    };
-  }
-  | {
-    value: "tagsLoaded";
-    context: {
-      tags: string[];
-      errors: undefined;
-    };
-  }
-  | {
-    value: "errored";
-    context: {
-      tags: undefined;
-      errors: Errors;
-    };
-  };
-
-export const tagsMachine = createMachine<ContextFrom<typeof tagsModel>, EventFrom<typeof tagsModel>, TagsState>(
+}).createMachine(
   {
     id: "tags",
     initial: "loading",
-    context: tagsModel.initialContext,
+    context: initialContext,
     states: {
       loading: {
         invoke: {
@@ -67,22 +61,4 @@ export const tagsMachine = createMachine<ContextFrom<typeof tagsModel>, EventFro
       errored: {}
     }
   },
-  {
-    actions: {
-      assignData: tagsModel.assign({
-        tags: (_, event) => {
-          return event.data.tags;
-        }
-      }, 'done.invoke.tagsRequest'),
-      assignErrors: tagsModel.assign({
-        errors: (_, event) => {
-          return event.data.errors;
-        }
-      }, 'error.platform')
-    },
-    guards: {},
-    services: {
-      requestTags: () => get<TagListResponse>("tags")
-    }
-  }
 );

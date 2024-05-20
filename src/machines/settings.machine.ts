@@ -1,51 +1,59 @@
-import { createMachine, ContextFrom, EventFrom } from "xstate";
-import { createModel } from 'xstate/lib/model'
+import { setup, assign, assertEvent, fromPromise } from "xstate";
 import { appRouter } from "../App";
 import { put } from "../utils/api-client";
 import type { User, UserResponse, Errors, ErrorsFrom } from "../types/api";
 
-type SettingsState = {
-  value: 'idle';
-  context: {
-    user: null;
-    errors: null;
-  }
-} | {
-  value: 'submitting';
-  context: {
-    user: null;
-    errors: null;
-  };
-} | {
-  value: 'success';
-  context: {
-    user: User;
-    errors: null;
-  };
-} | {
-  value: 'failed';
-  context: {
-    user: null;
-    errors: Errors;
-  };
+type SettingsContext = {
+  user: User | null;
+  errors: Errors | null;
 }
 
-export const settingsModel = createModel({
-  user: null as User | null,
-  errors: null as Errors | null,
-}, {
-  events: {
-    submit: (values: User) => ({ values }),
-    'done.invoke.updateUser': (data: UserResponse) => ({ data }),
-    'error.platform.updateUser': (data: ErrorsFrom<UserResponse>) => ({ data })
-  }
-})
+const initialContext: SettingsContext = {
+  user: null,
+  errors: null,
+}
 
-export const settingsMachine = createMachine<ContextFrom<typeof settingsModel>, EventFrom<typeof settingsModel>, SettingsState>(
+export const settingsMachine = setup({
+  types: {
+    context: {} as SettingsContext,
+    events: {} as
+      | { type: 'submit', values: User }
+      | { type: 'xstate.done.actor.updateUser', output: UserResponse }
+      | { type: 'xstate.error.actor.updateUser', error: ErrorsFrom<UserResponse> }
+  },
+  actions: {
+    assignFormValues: assign({
+      user: ({ event }) => {
+        assertEvent(event, 'submit');
+        return event.values;
+      }
+    }),
+    assignData: assign({
+      user: ({ event }) => {
+        assertEvent(event, 'xstate.done.actor.updateUser');
+        return event.output.user;
+      }
+    }),
+    assignErrors: assign({
+      errors: ({ event }) => {
+        assertEvent(event, 'xstate.error.actor.updateUser');
+        return event.error.errors;
+      }
+    }),
+    goToProfile: ({ context }) =>
+      appRouter.navigate(`/profile/${context.user?.username}`),
+    clearErrors: assign({ errors: null }),
+    updateParent: () => { throw new Error('updateParent must be provided when creating machine actor') }
+  },
+  actors: {
+    userRequest: fromPromise(({ input }: { input: Pick<SettingsContext, 'user'> }) =>
+      put<UserResponse, { user: User | null }>("user", { user: input.user }))
+  }
+}).createMachine(
   {
     id: "settings-request",
     initial: "idle",
-    context: settingsModel.initialContext,
+    context: initialContext,
     states: {
       idle: {
         on: {
@@ -59,6 +67,7 @@ export const settingsMachine = createMachine<ContextFrom<typeof settingsModel>, 
         invoke: {
           id: "updateUser",
           src: "userRequest",
+          input: ({ context }) => ({ user: context.user }),
           onDone: {
             target: "success",
             actions: "assignData"
@@ -83,24 +92,4 @@ export const settingsMachine = createMachine<ContextFrom<typeof settingsModel>, 
       }
     }
   },
-  {
-    actions: {
-      assignFormValues: settingsModel.assign({
-        user: (_, event) => event.values,
-      }, 'submit'),
-      assignData: settingsModel.assign({
-        user: (_, event) => event.data.user,
-      }, 'done.invoke.updateUser'),
-      assignErrors: settingsModel.assign({
-        errors: (_, event) => event.data.errors,
-      }, 'error.platform.updateUser'),
-      goToProfile: context =>
-        appRouter.navigate(`/profile/${context.user?.username}`),
-      clearErrors: settingsModel.assign({ errors: null })
-    },
-    services: {
-      userRequest: ({ user }) =>
-        put<UserResponse, { user: User | null }>("user", { user })
-    }
-  }
 );

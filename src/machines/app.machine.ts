@@ -1,9 +1,8 @@
-import { createMachine, spawn, ActorRefFrom, EventFrom, ContextFrom } from "xstate";
+import { assertEvent, assign, setup, fromPromise, ActorRefFrom } from "xstate";
 import { authMachine } from "./auth.machine";
 import { get } from "../utils/api-client";
 import { appRouter } from "../App";
 import type { ErrorsFrom, UserResponse, User } from "../types/api";
-import { createModel } from "xstate/lib/model";
 
 export type UserState =
   | "user.unauthenticated"
@@ -19,64 +18,61 @@ const initialContext: AppContext = {
   auth: null,
 };
 
-export const appModel = createModel(initialContext, {
-  events: {
-    'logIn': (user: User) => ({ user }),
-    'updateUser': (user: User) => ({ user }),
-    'done.invoke.userRequest': (data: UserResponse) => ({ data }),
-    'logOut': () => ({}),
-    'error.platform': (data: ErrorsFrom<UserResponse>) => ({ data }),
+export const appMachine = setup({
+  types: {
+    context: {} as AppContext,
+    events: {} as
+      | { type: "updateUser", user: User }
+      | { type: "logIn", user: User }
+      | { type: "xstate.done.actor.userRequest", output: UserResponse }
+      | { type: "logOut" }
+      | { type: "xstate.error.actor", error: ErrorsFrom<UserResponse> }
+  },
+  actions: {
+    assignUserFromEvent: assign({
+      user: ({ event }) => {
+        assertEvent(event, ["updateUser", "logIn"])
+        return event.user;
+      }
+    }),
+    assignUserData: assign({
+      user: ({ event }) => {
+        assertEvent(event, "xstate.done.actor.userRequest")
+        return event.output.user;
+      }
+    }),
+    createAuthMachine: assign({
+      auth: ({ spawn }) => spawn(authMachine) as ActorRefFrom<typeof authMachine>
+    }),
+    goHome: () => appRouter.navigate('/'),
+    resetToken: () => localStorage.removeItem("conduit_token"),
+    resetUserData: assign({ user: undefined })
+  },
+  guards: {
+    userExists: ({ context }) => !!context.user,
+    tokenAvailable: () => localStorage.getItem("conduit_token") !== null
+  },
+  actors: {
+    requestUser: fromPromise(() => get<UserResponse>("user"))
   }
-})
-
-export type AppState =
-  | {
-    value: "user";
-    context: {
-      auth: ActorRefFrom<typeof authMachine>;
-      user?: User;
-    };
-  }
-  | {
-    value: "user.unauthenticated";
-    context: {
-      auth: ActorRefFrom<typeof authMachine>;
-      user: undefined;
-    };
-  }
-  | {
-    value: "user.authenticating";
-    context: {
-      auth: ActorRefFrom<typeof authMachine>;
-      user: undefined;
-    };
-  }
-  | {
-    value: "user.authenticated";
-    context: {
-      auth: ActorRefFrom<typeof authMachine>;
-      user: User;
-    };
-  };
-
-export const appMachine = createMachine<ContextFrom<typeof appModel>, EventFrom<typeof appModel>, AppState>(
+}).createMachine(
   {
     id: "app",
     type: "parallel",
-    context: appModel.initialContext,
+    context: initialContext,
     states: {
       user: {
-        onEntry: "createAuthMachine",
+        entry: "createAuthMachine",
         initial: "unauthenticated",
         states: {
           unauthenticated: {
             always: [
               {
-                cond: "userExists",
+                guard: "userExists",
                 target: "#app.user.authenticated"
               },
               {
-                cond: "tokenAvailable",
+                guard: "tokenAvailable",
                 target: "#app.user.authenticating"
               }
             ]
@@ -111,36 +107,6 @@ export const appMachine = createMachine<ContextFrom<typeof appModel>, EventFrom<
           }
         }
       }
-    }
-  },
-  {
-    actions: {
-      assignUserFromEvent: appModel.assign({
-        user: (context, event) => {
-          if (event.type === "updateUser" || event.type === "logIn") {
-            return event.user;
-          }
-          return context.user;
-        }
-      }),
-      assignUserData: appModel.assign({
-        user: (_, event) => {
-          return event.data.user;
-        }
-      }, 'done.invoke.userRequest'),
-      createAuthMachine: appModel.assign({
-        auth: () => spawn(authMachine) as ActorRefFrom<typeof authMachine>
-      }),
-      goHome: () => appRouter.navigate('/'),
-      resetToken: () => localStorage.removeItem("conduit_token"),
-      resetUserData: appModel.assign({ user: undefined })
-    },
-    guards: {
-      userExists: context => !!context.user,
-      tokenAvailable: () => localStorage.getItem("conduit_token") !== null
-    },
-    services: {
-      requestUser: () => get<UserResponse>("user")
     }
   }
 );

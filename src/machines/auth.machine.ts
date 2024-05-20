@@ -1,8 +1,7 @@
-import { createMachine, sendParent, EventFrom, ContextFrom } from "xstate";
+import { setup, assign, assertEvent, sendParent, fromPromise } from "xstate";
 import { appRouter } from "../App";
 import { post } from "../utils/api-client";
 import type { ErrorsFrom, UserResponse } from "../types/api";
-import { createModel } from "xstate/lib/model";
 
 type Nullable<T> = Record<keyof T, null>;
 
@@ -28,57 +27,97 @@ const initialContext: AuthContext = {
   token: null,
 };
 
-export const authModel = createModel(initialContext, {
-  events: {
-    'submit': (values: FormValues) => values,
-    'error.platform': (data: ErrorsFrom<UserResponse>) => ({ data }),
-    'done.invoke.signupUser': (data: UserResponse) => ({ data }),
-    'done.invoke.loginUser': (data: UserResponse) => ({ data }),
+export const authMachine = setup({
+  types: {
+    context: {} as AuthContext,
+    events: {} as
+      | FormValues & { type: "submit" }
+      | { type: "xstate.error.actor.loginUser", error: ErrorsFrom<UserResponse> }
+      | { type: "xstate.error.actor.signupUser", error: ErrorsFrom<UserResponse> }
+      | { type: "xstate.done.actor.signupUser", output: UserResponse }
+      | { type: "xstate.done.actor.loginUser", output: UserResponse }
+  },
+  actions: {
+    assignFormValues: assign(({ context, event }) => {
+      assertEvent(event, "submit")
+      return {
+        ...context,
+        name: event.name,
+        email: event.email,
+        password: event.password
+      };
+    }),
+    assignData: assign({
+      token: ({ context, event }) => {
+        if (
+          event.type === "xstate.done.actor.loginUser" ||
+          event.type === "xstate.done.actor.signupUser"
+        ) {
+          return event.output.user.token;
+        }
+        return context.token;
+      }
+    }),
+    assignErrors: assign({
+      errors: ({ event }) => {
+        assertEvent(event, ["xstate.error.actor.signupUser", "xstate.error.actor.loginUser"])
+        return event.error.errors;
+      }
+    }),
+    saveToken: ({ context }) => {
+      localStorage.setItem("conduit_token", context.token || "");
+    },
+    clearErrors: assign({
+      errors: ({ context }) => {
+        if (!!context.errors) return null;
+        return context.errors;
+      }
+    }),
+    navigateHome: () => appRouter.navigate("/"),
+    notifyParent: sendParent(({ event }) => {
+      if (
+        event.type === "xstate.done.actor.loginUser" ||
+        event.type === "xstate.done.actor.signupUser"
+      ) {
+        return {
+          type: "LOGGED_IN",
+          ...event.output
+        };
+      }
+      return { type: "NEVER" };
+    })
+  },
+  guards: {
+    dataExists: ({ event }) => {
+      if (
+        event.type === "xstate.done.actor.loginUser" ||
+        event.type === "xstate.done.actor.signupUser"
+      ) {
+        return !!event.output.user;
+      }
+      return false;
+    },
+    nameExists: ({ context }) => !!context.name
+  },
+  actors: {
+    signupRequest: fromPromise(async ({ input }: { input: FormValues }) =>
+      await post("users", {
+        user: {
+          username: input.name,
+          email: input.email,
+          password: input.password
+        }
+      })),
+    loginRequest: fromPromise(async ({ input }: { input: Pick<FormValues, 'email' | 'password'> }) =>
+      await post("users/login", {
+        user: { email: input.email, password: input.password }
+      }))
   }
-})
-
-export type AuthState =
-  | { value: "idle"; context: Nullable<AuthContext> }
-  | {
-    value: "submitting" | { submitting: "choosing" };
-    context: Nullable<AuthContext> & { email: string; password: string };
-  }
-  | {
-    value: { submitting: "signup" };
-    context: Nullable<AuthContext> & {
-      email: string;
-      password: string;
-      name: string;
-    };
-  }
-  | {
-    value: { submitting: "login" };
-    context: Nullable<AuthContext> & { email: string; password: string };
-  }
-  | {
-    value: "authenticated";
-    context: Nullable<AuthContext> & {
-      email: string;
-      password: string;
-      name: string | null;
-      token: string;
-    };
-  }
-  | {
-    value: "failed";
-    context: AuthContext & {
-      email: string;
-      password: string;
-      name: string | null;
-      errors: Record<string, string[]>;
-    };
-  };
-
-export const authMachine = createMachine<ContextFrom<typeof authModel>, EventFrom<typeof authModel>, AuthState>(
+}).createMachine(
   {
     id: "auth-request",
     initial: "idle",
-    context: authModel.initialContext,
+    context: initialContext,
     states: {
       idle: {
         on: {
@@ -94,7 +133,7 @@ export const authMachine = createMachine<ContextFrom<typeof authModel>, EventFro
           choosing: {
             always: [
               {
-                cond: "nameExists",
+                guard: "nameExists",
                 target: "signup"
               },
               {
@@ -106,6 +145,11 @@ export const authMachine = createMachine<ContextFrom<typeof authModel>, EventFro
             invoke: {
               id: "signupUser",
               src: "signupRequest",
+              input: ({ context }) => ({
+                email: context.email || '',
+                name: context.name || '',
+                password: context.password || '',
+              }),
               onDone: {
                 target: "#auth-request.authenticated",
                 actions: ["notifyParent", "assignData"]
@@ -120,6 +164,10 @@ export const authMachine = createMachine<ContextFrom<typeof authModel>, EventFro
             invoke: {
               id: "loginUser",
               src: "loginRequest",
+              input: ({ context }) => ({
+                email: context.email || '',
+                password: context.password || '',
+              }),
               onDone: {
                 target: "#auth-request.authenticated",
                 actions: ["notifyParent", "assignData"]
@@ -133,10 +181,10 @@ export const authMachine = createMachine<ContextFrom<typeof authModel>, EventFro
         }
       },
       authenticated: {
-        onEntry: ["saveToken", "navigateHome"]
+        entry: ["saveToken", "navigateHome"]
       },
       failed: {
-        onExit: "clearErrors",
+        exit: "clearErrors",
         on: {
           submit: {
             target: "submitting",
@@ -144,82 +192,6 @@ export const authMachine = createMachine<ContextFrom<typeof authModel>, EventFro
           }
         }
       }
-    }
-  },
-  {
-    actions: {
-      assignFormValues: authModel.assign((context, event) => {
-        return {
-          ...context,
-          name: event.name,
-          email: event.email,
-          password: event.password
-        };
-      }, 'submit'),
-      assignData: authModel.assign({
-        token: (context, event) => {
-          if (
-            event.type === "done.invoke.loginUser" ||
-            event.type === "done.invoke.signupUser"
-          ) {
-            return event.data.user.token;
-          }
-          return context.token;
-        }
-      }),
-      assignErrors: authModel.assign({
-        errors: (_, event) => {
-          return event.data.errors;
-        }
-      }, 'error.platform'),
-      saveToken: context => {
-        localStorage.setItem("conduit_token", context.token || "");
-      },
-      clearErrors: authModel.assign({
-        errors: context => {
-          if (!!context.errors) return null;
-          return context.errors;
-        }
-      }),
-      navigateHome: () => appRouter.navigate("/"),
-      notifyParent: sendParent((_context, event) => {
-        if (
-          event.type === "done.invoke.loginUser" ||
-          event.type === "done.invoke.signupUser"
-        ) {
-          return {
-            type: "LOGGED_IN",
-            ...event.data
-          };
-        }
-        return { type: "NEVER" };
-      })
-    },
-    guards: {
-      dataExists: (_context, event) => {
-        if (
-          event.type === "done.invoke.loginUser" ||
-          event.type === "done.invoke.signupUser"
-        ) {
-          return !!event.data.user;
-        }
-        return false;
-      },
-      nameExists: context => !!context.name
-    },
-    services: {
-      signupRequest: context =>
-        post("users", {
-          user: {
-            username: context.name,
-            email: context.email,
-            password: context.password
-          }
-        }),
-      loginRequest: context =>
-        post("users/login", {
-          user: { email: context.email, password: context.password }
-        })
     }
   }
 );

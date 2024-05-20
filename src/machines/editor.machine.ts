@@ -1,5 +1,4 @@
-import { createMachine, EventFrom, ContextFrom } from "xstate";
-import { createModel } from 'xstate/lib/model';
+import { setup, assign, assertEvent, fromPromise } from "xstate";
 import { get, post, put } from "../utils/api-client";
 import { appRouter } from "../App";
 import type { ArticleResponse, Article, Errors, ErrorsFrom } from "../types/api";
@@ -18,70 +17,92 @@ type EditorContext = {
 
 const initialContext: EditorContext = {};
 
-export const editorModel = createModel(initialContext, {
-  events: {
-    'done.invoke.articleRequest': (data: ArticleResponse) => ({ data }),
-    'done.invoke.getArticle': (data: ArticleResponse) => ({ data }),
-    'error.platform': (data: ErrorsFrom<ArticleResponse>) => ({ data }),
-    'submit': (values: FormValues) => ({ values }),
+export const editorMachine = setup({
+  types: {
+    context: {} as EditorContext,
+    events: {} as
+      | { type: 'xstate.done.actor.articleRequest', output: ArticleResponse }
+      | { type: 'xstate.done.actor.getArticle', output: ArticleResponse }
+      | { type: 'xstate.error.actor', error: ErrorsFrom<ArticleResponse> }
+      | { type: 'submit', values: FormValues },
+    input: {} as {
+      slug?: string,
+    }
+  },
+  actions: {
+    assignArticleValues: assign({
+      article: ({ event }) => {
+        assertEvent(event, 'xstate.done.actor.getArticle')
+        return event.output.article;
+      },
+      formValues: ({ event }) => {
+        assertEvent(event, 'xstate.done.actor.getArticle')
+        return {
+          title: event.output.article.title,
+          description: event.output.article.description,
+          body: event.output.article.body,
+          tagList: event.output.article.tagList
+        };
+      }
+    }),
+    assignData: assign({
+      article: ({ event }) => {
+        assertEvent(event, 'xstate.done.actor.articleRequest')
+        return event.output.article;
+      }
+    }),
+    assignErrors: assign({
+      errors: ({ event }) => {
+        assertEvent(event, 'xstate.error.actor');
+        return event.error.errors;
+      }
+    }),
+    assignValues: assign({
+      formValues: ({ event }) => {
+        assertEvent(event, 'submit');
+        return event.values;
+      }
+    }),
+    goToArticle: ({ context }) => appRouter.navigate(`/article/${context.article?.slug}`)
+  },
+  guards: {
+    slugExists: ({ context }) => !!context.slug
+  },
+  actors: {
+    createArticle: fromPromise(async ({ input }: { input: { formValues?: FormValues } }) => {
+      if (input.formValues) {
+        return await post<ArticleResponse, { article: FormValues }>("articles", {
+          article: input.formValues
+        });
+      }
+      return Promise.reject();
+    }),
+    getArticle: fromPromise(async ({ input }: { input: { slug?: string } }) => {
+      if (input.slug) {
+        return await get<ArticleResponse>(`articles/${input.slug}`);
+      }
+      return Promise.reject();
+    }),
+    updateArticle: fromPromise(async ({ input }: { input: { formValues?: FormValues, slug?: string } }) => {
+      if (input.formValues && input.slug) {
+        return await put<ArticleResponse, { article: FormValues }>(
+          `articles/${input.slug}`,
+          {
+            article: input.formValues
+          }
+        );
+      }
+      return Promise.reject();
+    })
   }
-})
-
-type EditorState =
-  | {
-    value: "idle" | { idle: "creating" };
-    context: {
-      article: undefined;
-      errors: undefined;
-      formValues: undefined;
-    };
-  }
-  | {
-    value: { idle: "updating" };
-    context: EditorContext & {
-      article: Article;
-      formValues: FormValues;
-      slug: string;
-    };
-  }
-  | {
-    value: "submitting" | { submitting: "creating" };
-    context: EditorContext & {
-      formValues: FormValues;
-    };
-  }
-  | {
-    value: { submitting: "updating" };
-    context: EditorContext & {
-      article: Article;
-      formValues: FormValues;
-      slug: string;
-    };
-  }
-  | {
-    value: "success";
-    context: EditorContext & {
-      article: Article;
-      formValues: FormValues;
-    };
-  }
-  | {
-    value: "errored";
-    context: EditorContext & {
-      errors: Errors;
-      formValues: FormValues;
-    };
-  };
-
-export const editorMachine = createMachine<
-  ContextFrom<typeof editorModel>,
-  EventFrom<typeof editorModel>,
-  EditorState
->(
+}).createMachine(
   {
     id: "editor",
     initial: "idle",
-    context: editorModel.initialContext,
+    context: ({ input }) => ({
+      ...initialContext,
+      ...input
+    }),
     states: {
       idle: {
         initial: "choosing",
@@ -90,7 +111,7 @@ export const editorMachine = createMachine<
             always: [
               {
                 target: "updating",
-                cond: "slugExists"
+                guard: "slugExists"
               },
               {
                 target: "creating"
@@ -109,6 +130,7 @@ export const editorMachine = createMachine<
             invoke: {
               id: "getArticle",
               src: "getArticle",
+              input: ({ context }) => ({ slug: context.slug }),
               onDone: {
                 actions: "assignArticleValues"
               }
@@ -123,11 +145,13 @@ export const editorMachine = createMachine<
         }
       },
       submitting: {
+        initial: 'creating',
         states: {
           creating: {
             invoke: {
               id: "articleRequest",
               src: "createArticle",
+              input: ({ context }) => ({ formValues: context.formValues }),
               onDone: {
                 target: "#success",
                 actions: "assignData"
@@ -138,6 +162,7 @@ export const editorMachine = createMachine<
             invoke: {
               id: "articleRequest",
               src: "updateArticle",
+              input: ({ context }) => ({ formValues: context.formValues, slug: context.slug }),
               onDone: {
                 target: "#success",
                 actions: "assignData"
@@ -146,7 +171,7 @@ export const editorMachine = createMachine<
           }
         },
         on: {
-          "error.platform": {
+          "xstate.error.actor": {
             target: "#errored",
             actions: "assignErrors"
           }
@@ -154,7 +179,7 @@ export const editorMachine = createMachine<
       },
       success: {
         id: "success",
-        onEntry: "goToArticle"
+        entry: "goToArticle"
       },
       errored: {
         id: "errored",
@@ -167,67 +192,4 @@ export const editorMachine = createMachine<
       }
     }
   },
-  {
-    actions: {
-      assignArticleValues: editorModel.assign({
-        article: (_, event) => {
-          return event.data.article;
-        },
-        formValues: (_, event) => {
-          return {
-            title: event.data.article.title,
-            description: event.data.article.description,
-            body: event.data.article.body,
-            tagList: event.data.article.tagList
-          };
-        }
-      }, 'done.invoke.getArticle'),
-      assignData: editorModel.assign({
-        article: (_, event) => {
-          return event.data.article;
-        }
-      }, 'done.invoke.articleRequest'),
-      assignErrors: editorModel.assign({
-        errors: (_, event) => {
-          return event.data.errors;
-        }
-      }, 'error.platform'),
-      assignValues: editorModel.assign({
-        formValues: (_, event) => {
-          return event.values;
-        }
-      }, 'submit'),
-      goToArticle: context => appRouter.navigate(`/article/${context.article?.slug}`)
-    },
-    guards: {
-      slugExists: context => !!context.slug
-    },
-    services: {
-      createArticle: context => {
-        if (context.formValues) {
-          return post<ArticleResponse, { article: FormValues }>("articles", {
-            article: context.formValues
-          });
-        }
-        return Promise.reject();
-      },
-      getArticle: context => {
-        if (context.slug) {
-          return get<ArticleResponse>(`articles/${context.slug}`);
-        }
-        return Promise.reject();
-      },
-      updateArticle: context => {
-        if (context.formValues && context.slug) {
-          return put<ArticleResponse, { article: FormValues }>(
-            `articles/${context.slug}`,
-            {
-              article: context.formValues
-            }
-          );
-        }
-        return Promise.reject();
-      }
-    }
-  }
 );
