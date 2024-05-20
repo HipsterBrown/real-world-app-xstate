@@ -3,8 +3,6 @@ import { appRouter } from "../App";
 import { post } from "../utils/api-client";
 import type { ErrorsFrom, UserResponse } from "../types/api";
 
-type Nullable<T> = Record<keyof T, null>;
-
 export type FormValues = {
   name?: string;
   email: string;

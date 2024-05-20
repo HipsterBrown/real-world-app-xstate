@@ -30,7 +30,8 @@ export const profileMachine = setup({
     events: {} as
       | { type: 'xstate.done.actor.profileRequest', output: ProfileResponse }
       | { type: 'xstate.done.actor.followRequest', output: ProfileResponse }
-      | { type: 'xstate.error.actor', error: ErrorsFrom<ProfileResponse> }
+      | { type: 'xstate.error.actor.profileRequest', error: ErrorsFrom<ProfileResponse> }
+      | { type: 'xstate.error.actor.followRequest', error: ErrorsFrom<ProfileResponse> }
       | { type: 'toggleFollowing' },
     input: {} as Pick<ProfileContext, 'profile'>,
   },
@@ -47,7 +48,7 @@ export const profileMachine = setup({
     }),
     assignErrors: assign({
       errors: ({ event }) => {
-        assertEvent(event, 'xstate.error.actor')
+        assertEvent(event, ['xstate.error.actor.profileRequest', 'xstate.error.actor.followRequest'])
         return event.error.errors;
       }
     }),
@@ -59,13 +60,10 @@ export const profileMachine = setup({
           ...profile,
           following: true
         },
-        followerRef: spawn(fromPromise(() =>
-          post<ProfileResponse, undefined>(
-            `profiles/${profile?.username}/follow`,
-            undefined
-          )),
-          { id: "followRequest" }
-        )
+        followerRef: spawn('followProfileRequest', {
+          id: "followRequest",
+          input: { profile: context.profile }
+        })
       };
     }),
     goToSignup: () => appRouter.navigate("/register"),
@@ -77,9 +75,11 @@ export const profileMachine = setup({
           ...profile,
           following: false
         },
-        followerRef: spawn(fromPromise(() =>
-          del<ProfileResponse>(`profiles/${profile?.username}/follow`)),
-          { id: "followRequest" }
+        followerRef: spawn('unfollowProfileRequest',
+          {
+            id: "followRequest",
+            input: { profile: context.profile }
+          }
         )
       };
     })
@@ -89,8 +89,12 @@ export const profileMachine = setup({
     notAuthenticated: () => true,
   },
   actors: {
-    getProfile: fromPromise(({ input }: { input: Pick<ProfileContext, 'profile'> }) =>
-      get<ProfileResponse>(`profiles/${input.profile?.username}`))
+    getProfile: fromPromise(async ({ input }: { input: Pick<ProfileContext, 'profile'> }) =>
+      await get<ProfileResponse>(`profiles/${input.profile?.username}`)),
+    followProfileRequest: fromPromise(async ({ input }: { input: Pick<ProfileContext, 'profile'> }) =>
+      await post<ProfileResponse, undefined>(`profiles/${input.profile?.username}/follow`, undefined)),
+    unfollowProfileRequest: fromPromise(async ({ input }: { input: Pick<ProfileContext, 'profile'> }) =>
+      await del<ProfileResponse>(`profiles/${input.profile?.username}/follow`))
   }
 }).createMachine(
   {

@@ -23,7 +23,8 @@ export const editorMachine = setup({
     events: {} as
       | { type: 'xstate.done.actor.articleRequest', output: ArticleResponse }
       | { type: 'xstate.done.actor.getArticle', output: ArticleResponse }
-      | { type: 'xstate.error.actor', error: ErrorsFrom<ArticleResponse> }
+      | { type: 'xstate.error.actor.articleRequest', error: ErrorsFrom<ArticleResponse> }
+      | { type: 'xstate.error.actor.getArticle', error: ErrorsFrom<ArticleResponse> }
       | { type: 'submit', values: FormValues },
     input: {} as {
       slug?: string,
@@ -53,7 +54,7 @@ export const editorMachine = setup({
     }),
     assignErrors: assign({
       errors: ({ event }) => {
-        assertEvent(event, 'xstate.error.actor');
+        assertEvent(event, ['xstate.error.actor.articleRequest', 'xstate.error.actor.getArticle']);
         return event.error.errors;
       }
     }),
@@ -171,7 +172,7 @@ export const editorMachine = setup({
           }
         },
         on: {
-          "xstate.error.actor": {
+          "xstate.error.actor.*": {
             target: "#errored",
             actions: "assignErrors"
           }

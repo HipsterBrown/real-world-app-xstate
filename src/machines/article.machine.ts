@@ -40,7 +40,10 @@ export const articleMachine =
     types: {
       context: {} as ArticleContext,
       events: {} as
-        | { type: "xstate.error.actor", error: ErrorsFrom<ArticleResponse | CommentListResponse | CommentResponse | ProfileResponse> }
+        | { type: "xstate.error.actor.getArticle", error: ErrorsFrom<ArticleResponse> }
+        | { type: "xstate.error.actor.creatingComment", error: ErrorsFrom<CommentResponse> }
+        | { type: "xstate.error.actor.getComments", error: ErrorsFrom<CommentListResponse> }
+        | { type: "xstate.error.actor.following", error: ErrorsFrom<ProfileResponse> }
         | { type: "xstate.done.actor.getArticle", output: ArticleResponse }
         | { type: "xstate.done.actor.deletingArticle" }
         | { type: "xstate.done.actor.getComments", output: CommentListResponse }
@@ -73,17 +76,13 @@ export const articleMachine =
       goHome: () => appRouter.navigate("/"),
       deleteArticle: assign({
         deletingRef: ({ context, spawn }) =>
-          spawn(fromPromise(() => del(`articles/${context.slug}`)), { id: "deletingArticle" })
+          spawn('deleteArticleRequest', { id: "deletingArticle", input: { slug: context.slug } })
       }),
       createComment: assign({
         creatingCommentRef: ({ context, event, spawn }) => {
           assertEvent(event, "createComment");
-          return spawn(
-            fromPromise(() => post<CommentResponse, { comment: Pick<Comment, "body"> }>(
-              `articles/${context.slug}/comments`,
-              { comment: event.comment }
-            )),
-            { id: "creatingComment" }
+          return spawn('createCommentRequest',
+            { id: "creatingComment", input: { slug: context.slug, comment: event.comment } }
           );
         }
       }),
@@ -92,7 +91,7 @@ export const articleMachine =
         return {
           ...context,
           deletingCommentRef: spawn(
-            fromPromise(() => del(`articles/${context.slug}/comments/${event.id}`))
+            'deleteCommentRequest', { input: { slug: context.slug, id: event.id } }
           ),
           comments:
             context.comments?.filter(comment => comment.id === event.id) || []
@@ -108,8 +107,8 @@ export const articleMachine =
           ...context,
           article,
           favoriteRef: spawn(
-            fromPromise(() => del<ArticleResponse>(`articles/${context.slug}/favorite`)),
-            { id: "favoriting" }
+            'unfavoriteRequest',
+            { id: "favoriting", input: { slug: context.slug } }
           )
         };
       }),
@@ -123,11 +122,8 @@ export const articleMachine =
           ...context,
           article,
           favoriteRef: spawn(
-            fromPromise(() => post<ArticleResponse>(
-              `articles/${context.slug}/favorite`,
-              undefined
-            )),
-            { id: "favoriting" }
+            'favoriteRequest',
+            { id: "favoriting", input: { slug: context.slug } }
           )
         };
       }),
@@ -135,12 +131,7 @@ export const articleMachine =
         assertEvent(event, "toggleFollow")
         return {
           ...context,
-          followingRef: spawn(
-            fromPromise(() => post<ProfileResponse>(
-              `profiles/${event.username}/follow`,
-              undefined
-            ))
-          ),
+          followingRef: spawn('followAuthorRequest', { input: { username: event.username } }),
           article: {
             ...context.article!,
             author: {
@@ -154,9 +145,7 @@ export const articleMachine =
         assertEvent(event, "toggleFollow")
         return {
           ...context,
-          followingRef: spawn(fromPromise(() =>
-            del<ProfileResponse>(`profiles/${event.username}/follow`)
-          )),
+          followingRef: spawn('unfollowAuthorRequest', { input: { username: event.username } }),
           article: {
             ...context.article!,
             author: {
@@ -184,9 +173,28 @@ export const articleMachine =
       notAuthenticated: () => true,
     },
     actors: {
+      createCommentRequest: fromPromise(async ({ input }: { input: Pick<ArticleContext, 'slug'> & { comment: Pick<Comment, 'body'> } }) => await post<CommentResponse, { comment: Pick<Comment, "body"> }>(
+        `articles/${input.slug}/comments`,
+        { comment: input.comment }
+      )),
+      deleteArticleRequest: fromPromise(async ({ input }: { input: Pick<ArticleContext, 'slug'> }) => await del<ArticleResponse>(`articles/${input.slug}`)),
+      deleteCommentRequest: fromPromise(async ({ input }: { input: Pick<ArticleContext, 'slug'> & { id: number } }) => await del<CommentResponse>(`articles/${input.slug}/comments/${input.id}`)),
+      favoriteRequest: fromPromise(async ({ input }: { input: Pick<ArticleContext, 'slug'> }) => await post<ArticleResponse>(
+        `articles/${input.slug}/favorite`,
+        undefined
+      )),
+      followAuthorRequest: fromPromise(async ({ input }: { input: { username: string } }) => await post<ProfileResponse>(
+        `profiles/${input.username}/follow`,
+        undefined
+      )),
       getArticle: fromPromise(({ input }: { input: Pick<ArticleContext, 'slug'> }) => get<ArticleResponse>(`articles/${input.slug}`)),
       getComments: fromPromise(({ input }: { input: Pick<ArticleContext, 'slug'> }) =>
-        get<CommentListResponse>(`articles/${input.slug}/comments`))
+        get<CommentListResponse>(`articles/${input.slug}/comments`)),
+      unfavoriteRequest: fromPromise(async ({ input }: { input: Pick<ArticleContext, 'slug'> }) => del<ArticleResponse>(`articles/${input.slug}/favorite`)),
+      unfollowAuthorRequest: fromPromise(async ({ input }: { input: { username: string } }) =>
+        await del<ProfileResponse>(`profiles/${input.username}/follow`)
+      ),
+
     }
   }).createMachine(
     {

@@ -97,10 +97,7 @@ export const feedMachine = setup({
       return {
         ...context,
         articles,
-        favoriteRef: spawn(fromPromise(() =>
-          del<ArticleResponse>(`articles/${event.slug}/favorite`),
-
-        ), { id: "favoriting" })
+        favoriteRef: spawn('unfavoriteRequest', { id: "favoriting", input: { slug: event.slug } })
       };
     }),
     favoriteArticle: assign(({ context, event, spawn }) => {
@@ -118,12 +115,8 @@ export const feedMachine = setup({
       return {
         ...context,
         articles,
-        favoriteRef: spawn(fromPromise(() =>
-          post<ArticleResponse>(
-            `articles/${event.slug}/favorite`,
-            undefined
-          )),
-          { id: "favoriting" }
+        favoriteRef: spawn('favoriteRequest',
+          { id: "favoriting", input: { slug: event.slug } }
         )
       };
     }),
@@ -146,6 +139,11 @@ export const feedMachine = setup({
 
   },
   actors: {
+    favoriteRequest: fromPromise(async ({ input }: { input: { slug: string } }) =>
+      await post<ArticleResponse>(
+        `articles/${input.slug}/favorite`,
+        undefined
+      )),
     feedRequest: fromPromise(({ input }: { input: Pick<FeedContext, 'params'> }) => {
       const params = new URLSearchParams({
         limit: input.params.limit.toString(),
@@ -160,7 +158,10 @@ export const feedMachine = setup({
         (input.params.feed === "me" ? "articles/feed?" : "articles?") +
         params.toString()
       );
-    })
+    }),
+    unfavoriteRequest: fromPromise(async ({ input }: { input: { slug: string } }) =>
+      await del<ArticleResponse>(`articles/${input.slug}/favorite`),
+    ),
   }
 }).createMachine(
   {
